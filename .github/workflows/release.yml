@@ -86,7 +86,10 @@ jobs:
       run: dotnet pack src/TSG/TSG.csproj -c Release -o artifacts -p:Version=${{ steps.ver.outputs.VERSION }}
 
     - name: Push to NuGet
-      run: dotnet nuget push artifacts/*.nupkg --api-key ${{ secrets.NUGET_TSG_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+      shell: pwsh
+      run: |
+        $pkg = Get-ChildItem artifacts/*.nupkg | Select-Object -First 1
+        dotnet nuget push $pkg.FullName --api-key ${{ secrets.NUGET_TSG_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
     - name: GitHub Release
       uses: softprops/action-gh-release@v2
