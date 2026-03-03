@@ -10,6 +10,7 @@ public static class Diagnostics
 {
     public static async Task RunDoctorAsync(IPlatformHost host)
     {
+        ArgumentNullException.ThrowIfNull(host);
         Console.WriteLine("\n  🩺 TSG Doctor — Environment Check\n");
         var issues = 0;
 
@@ -58,7 +59,10 @@ public static class Diagnostics
                     var type = doc.RootElement.GetProperty("type").GetString();
                     if (type is "assistant.turn_start" or "tool.execution_start") stuck++;
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or JsonException or IndexOutOfRangeException or KeyNotFoundException)
+                {
+                    // Silently skip unreadable/malformed session files (READ-ONLY scan)
+                }
             }
 
             if (large > 0) Check("⚠️", $"{large} session(s) > 20MB — may cause slowness", "Yellow");
