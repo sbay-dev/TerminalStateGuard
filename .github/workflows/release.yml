@@ -1,0 +1,47 @@
+name: Release to NuGet
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET 10
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Extract version
+      id: ver
+      shell: pwsh
+      run: |
+        $v = "${{ github.ref_name }}" -replace '^v', ''
+        if (-not $v) { $v = "1.0.0" }
+        "VERSION=$v" >> $env:GITHUB_OUTPUT
+
+    - name: Build
+      run: dotnet build src/TSG/TSG.csproj -c Release -p:Version=${{ steps.ver.outputs.VERSION }}
+
+    - name: Pack
+      run: dotnet pack src/TSG/TSG.csproj -c Release -o artifacts -p:Version=${{ steps.ver.outputs.VERSION }}
+
+    - name: Push to NuGet
+      run: dotnet nuget push artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+    - name: GitHub Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: artifacts/*.nupkg
+        generate_release_notes: true
