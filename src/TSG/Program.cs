@@ -1,6 +1,9 @@
-using System.Reflection;
+using System.Text;
 using TSG;
 using TSG.Platform;
+
+Console.OutputEncoding = Encoding.UTF8;
+Console.InputEncoding = Encoding.UTF8;
 
 var host = PlatformHost.Detect();
 var commands = CommandRegistry.Build(host);

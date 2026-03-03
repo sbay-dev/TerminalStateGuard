@@ -45,12 +45,14 @@ public class WindowsHost : IPlatformHost
         Directory.CreateDirectory(FragmentDir);
 
         var tsgDir = TsgDir.Replace("\\", "\\\\", StringComparison.Ordinal);
+        var pwshPath = (FindShell() ?? @"C:\Program Files\PowerShell\7\pwsh.exe")
+            .Replace("\\", "\\\\", StringComparison.Ordinal);
         var fragment = $$"""
         {
             "profiles": [
                 {
                     "name": "⚡ TSG Monitor",
-                    "commandline": "pwsh -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Monitor",
+                    "commandline": "{{pwshPath}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Monitor",
                     "icon": "⚡",
                     "startingDirectory": "%USERPROFILE%"
                 }
