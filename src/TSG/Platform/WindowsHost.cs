@@ -37,23 +37,47 @@ public class WindowsHost : IPlatformHost
     public string GetScriptPrefix(string scriptPath) => $"& '{scriptPath}'";
 
     /// <summary>
-    /// Install Windows Terminal Fragment — native integration without modifying settings.json.
-    /// Adds TSG profile and keyboard shortcuts directly to Windows Terminal.
+    /// Install Windows Terminal Fragment with all TSG profiles and shortcuts.
     /// </summary>
     public async Task InstallTerminalIntegrationAsync()
     {
         Directory.CreateDirectory(FragmentDir);
 
-        var tsgDir = TsgDir.Replace("\\", "\\\\", StringComparison.Ordinal);
-        var pwshPath = (FindShell() ?? @"C:\Program Files\PowerShell\7\pwsh.exe")
-            .Replace("\\", "\\\\", StringComparison.Ordinal);
+        var tsgDir = TsgDir.Replace(@"\", @"\\", StringComparison.Ordinal);
+        var pwsh = (FindShell() ?? @"C:\Program Files\PowerShell\7\pwsh.exe")
+            .Replace(@"\", @"\\", StringComparison.Ordinal);
+
         var fragment = $$"""
         {
             "profiles": [
                 {
-                    "name": "⚡ TSG Monitor",
-                    "commandline": "{{pwshPath}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Monitor",
-                    "icon": "⚡",
+                    "name": "\u26a1 TSG Boost [Admin]",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process '{{pwsh}}' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\\"{{tsgDir}}\\CopilotBoost.ps1\\\" -Mode Boost'\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udcca TSG Monitor",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Monitor",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udccb TSG Status",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Status",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udd04 TSG Recover",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\RecoverSessions.ps1\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udd04 TSG Restore [Admin]",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process '{{pwsh}}' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\\"{{tsgDir}}\\CopilotBoost.ps1\\\" -Mode Restore'\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83e\ude7a TSG Doctor",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg doctor; Read-Host 'Press Enter to close'\"",
                     "startingDirectory": "%USERPROFILE%"
                 }
             ],
@@ -68,8 +92,8 @@ public class WindowsHost : IPlatformHost
         """;
 
         await File.WriteAllTextAsync(Path.Combine(FragmentDir, "tsg.json"), fragment);
-        Console.WriteLine($"  ✅ Windows Terminal Fragment installed: {FragmentDir}");
-        Console.WriteLine("     Shortcuts will appear after reopening Windows Terminal.");
+        Console.WriteLine($"  \u2705 Windows Terminal Fragment installed: {FragmentDir}");
+        Console.WriteLine("     All TSG profiles added to terminal dropdown.");
     }
 
     public async Task RemoveTerminalIntegrationAsync()
@@ -77,7 +101,7 @@ public class WindowsHost : IPlatformHost
         if (Directory.Exists(FragmentDir))
         {
             Directory.Delete(FragmentDir, true);
-            Console.WriteLine("  ✅ Windows Terminal Fragment removed");
+            Console.WriteLine("  \u2705 Windows Terminal Fragment removed");
         }
         await Task.CompletedTask;
     }
