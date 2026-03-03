@@ -56,8 +56,8 @@ public class Installer(IPlatformHost host)
         if (File.Exists(host.ShellProfilePath))
         {
             var content = await File.ReadAllTextAsync(host.ShellProfilePath);
-            var start = content.IndexOf(Marker);
-            var end = content.IndexOf(EndMarker);
+            var start = content.IndexOf(Marker, StringComparison.Ordinal);
+            var end = content.IndexOf(EndMarker, StringComparison.Ordinal);
             if (start >= 0 && end >= 0)
             {
                 content = content[..start] + content[(end + EndMarker.Length)..];
@@ -78,7 +78,7 @@ public class Installer(IPlatformHost host)
         var assembly = System.Reflection.Assembly.GetExecutingAssembly();
         var folder = OperatingSystem.IsWindows() ? ".Scripts.windows." : ".Scripts.linux.";
 
-        foreach (var name in assembly.GetManifestResourceNames().Where(n => n.Contains(folder)))
+        foreach (var name in assembly.GetManifestResourceNames().Where(n => n.Contains(folder, StringComparison.Ordinal)))
         {
             var fileName = name[(name.LastIndexOf('.', name.LastIndexOf('.') - 1) + 1)..];
             var destPath = Path.Combine(host.TsgDir, fileName);
@@ -97,8 +97,8 @@ public class Installer(IPlatformHost host)
         var existing = File.Exists(host.ShellProfilePath) ? File.ReadAllText(host.ShellProfilePath) : "";
 
         // Remove old block
-        var start = existing.IndexOf(Marker);
-        var end = existing.IndexOf(EndMarker);
+        var start = existing.IndexOf(Marker, StringComparison.Ordinal);
+        var end = existing.IndexOf(EndMarker, StringComparison.Ordinal);
         if (start >= 0 && end >= 0)
             existing = existing[..start] + existing[(end + EndMarker.Length)..];
 

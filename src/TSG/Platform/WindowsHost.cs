@@ -44,7 +44,7 @@ public class WindowsHost : IPlatformHost
     {
         Directory.CreateDirectory(FragmentDir);
 
-        var tsgDir = TsgDir.Replace("\\", "\\\\");
+        var tsgDir = TsgDir.Replace("\\", "\\\\", StringComparison.Ordinal);
         var fragment = $$"""
         {
             "profiles": [
@@ -98,6 +98,7 @@ public class WindowsHost : IPlatformHost
             p?.WaitForExit();
             return p?.ExitCode == 0 ? exe : null;
         }
-        catch { return null; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+        { return null; }
     }
 }

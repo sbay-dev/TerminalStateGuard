@@ -32,7 +32,7 @@ public class LinuxHost : IPlatformHost
         var profilePath = ShellProfilePath;
         var existing = File.Exists(profilePath) ? await File.ReadAllTextAsync(profilePath) : "";
 
-        if (existing.Contains("# TSG START"))
+        if (existing.Contains("# TSG START", StringComparison.Ordinal))
         {
             Console.WriteLine("  ✅ Shell integration already installed");
             return;
@@ -64,8 +64,8 @@ public class LinuxHost : IPlatformHost
         if (!File.Exists(profilePath)) return;
 
         var content = await File.ReadAllTextAsync(profilePath);
-        var start = content.IndexOf("# TSG START");
-        var end = content.IndexOf("# TSG END");
+        var start = content.IndexOf("# TSG START", StringComparison.Ordinal);
+        var end = content.IndexOf("# TSG END", StringComparison.Ordinal);
         if (start >= 0 && end >= 0)
         {
             content = content[..start] + content[(end + "# TSG END".Length)..];
