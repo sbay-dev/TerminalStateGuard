@@ -163,4 +163,4 @@ function Invoke-Help { Write-Section "COMMANDS"; Write-Host "  Boost   ⚡ Eleva
 
 Write-Banner; $isAdmin = Test-Admin; Write-Host "  Running as: $(if ($isAdmin) {'✅ Admin'} else {'👤 User'})" -ForegroundColor $(if ($isAdmin) {"Green"} else {"Gray"})
 switch ($Mode) { "Boost" { Invoke-Boost } "Monitor" { Invoke-Monitor } "Status" { Invoke-Status } "Restore" { Invoke-Restore } "Help" { Invoke-Help } }
-if ($script:AdminModes -contains $Mode -and $isAdmin) { Write-Host "`n  Press any key..." -ForegroundColor DarkGray; $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") }    Copilot Performance Booster Script
+if ($script:AdminModes -contains $Mode -and $isAdmin) { Write-Host "`n  Press any key..." -ForegroundColor DarkGray; $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") }
