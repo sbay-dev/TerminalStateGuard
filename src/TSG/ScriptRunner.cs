@@ -15,6 +15,7 @@ public class ScriptRunner(IPlatformHost host)
         ["status"]  = ("CopilotBoost.ps1", "-Mode Status"),
         ["restore"] = ("CopilotBoost.ps1", "-Mode Restore"),
         ["recover"] = ("RecoverSessions.ps1", ""),
+        ["focus"]   = ("Focus.ps1", ""),
     };
 
     public async Task<int> RunAsync(string command, string[] extraArgs)

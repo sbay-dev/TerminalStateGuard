@@ -21,6 +21,7 @@ public static class CommandRegistry
             ["status"]    = args => runner.RunAsync("status", args),
             ["recover"]   = args => runner.RunAsync("recover", args),
             ["restore"]   = args => runner.RunAsync("restore", args),
+            ["focus"]     = args => runner.RunAsync("focus", args),
             ["doctor"]    = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
             ["version"]   = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
             ["help"]      = _ => { PrintHelp(); return Task.FromResult(0); },
@@ -41,7 +42,7 @@ public static class CommandRegistry
             ██║   ╚════██║██║   ██║
             ██║   ███████║╚██████╔╝
             ╚═╝   ╚══════╝ ╚═════╝ 
-          ⚡ Terminal State Guard v1.0 ⚡
+          ⚡ Terminal State Guard v1.2 ⚡
           Platform: {os} | .NET {Environment.Version}
 
           USAGE:
@@ -52,6 +53,9 @@ public static class CommandRegistry
             tsg status        Quick health check
             tsg recover       Recover terminal sessions
             tsg restore       Restore original priorities
+            tsg focus         Focus ALL resources on one stuck process (Admin)
+            tsg focus <PID>   Focus on specific PID
+            tsg focus --undo  Restore normal priorities
             tsg doctor        Diagnose environment issues
             tsg version       Show version
 

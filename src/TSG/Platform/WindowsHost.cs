@@ -76,6 +76,11 @@ public class WindowsHost : IPlatformHost
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
+                {
+                    "name": "\ud83c\udfaf TSG Focus [Admin]",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\Focus.ps1\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
                     "name": "\ud83e\ude7a TSG Doctor",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg doctor; Read-Host 'Press Enter to close'\"",
                     "startingDirectory": "%USERPROFILE%"
@@ -86,7 +91,8 @@ public class WindowsHost : IPlatformHost
                 {"keys":"ctrl+alt+m","command":{"action":"sendInput","input":"tsg monitor\r\n"},"name":"TSG: Monitor"},
                 {"keys":"ctrl+alt+s","command":{"action":"sendInput","input":"tsg status\r\n"},"name":"TSG: Status"},
                 {"keys":"ctrl+alt+f","command":{"action":"sendInput","input":"tsg recover\r\n"},"name":"TSG: Recover"},
-                {"keys":"ctrl+alt+r","command":{"action":"sendInput","input":"tsg restore\r\n"},"name":"TSG: Restore"}
+                {"keys":"ctrl+alt+r","command":{"action":"sendInput","input":"tsg restore\r\n"},"name":"TSG: Restore"},
+                {"keys":"ctrl+alt+g","command":{"action":"sendInput","input":"tsg focus\r\n"},"name":"TSG: Focus"}
             ]
         }
         """;

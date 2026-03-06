@@ -37,12 +37,13 @@ public class Installer(IPlatformHost host)
             tsg status      📋 Health check
             tsg recover     🔄 Recover sessions
             tsg restore     🔄 Restore priorities
+            tsg focus        🎯 Focus ALL resources on stuck process
             tsg doctor      🩺 Environment diagnostics
 
           ═══ SHORTCUTS ═══
             Ctrl+Alt+B → Boost     Ctrl+Alt+M → Monitor
             Ctrl+Alt+S → Status    Ctrl+Alt+F → Recover
-            Ctrl+Alt+R → Restore
+            Ctrl+Alt+R → Restore  Ctrl+Alt+G → Focus
 
           🎉 Installation complete! Reopen terminal to activate.
         """);
