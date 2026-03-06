@@ -76,11 +76,11 @@ public class WindowsHost : IPlatformHost
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
-                {
                     "name": "\ud83c\udfaf TSG Focus [Admin]",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\Focus.ps1\"",
                     "startingDirectory": "%USERPROFILE%"
                 },
+                {
                     "name": "\ud83e\ude7a TSG Doctor",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg doctor; Read-Host 'Press Enter to close'\"",
                     "startingDirectory": "%USERPROFILE%"
