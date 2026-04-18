@@ -366,7 +366,7 @@ public sealed class TerminalDatabase : IDisposable
     /// Enriches tabs with copilot session IDs from earlier captures if the last capture lost them
     /// (copilot process may have ended before window closed).
     /// </summary>
-    public List<CaptureTab> GetLastKnownTabs(string windowId)
+    public List<CaptureTab> GetLastKnownTabs(string windowId, string? referenceTime = null)
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
@@ -418,7 +418,7 @@ public sealed class TerminalDatabase : IDisposable
 
         // Enrich: if any tab lost its copilot session ID (copilot ended before window closed),
         // recover it from earlier captures for the same window
-        EnrichTabsWithHistoricalSessionIds(windowId, tabs);
+        EnrichTabsWithHistoricalSessionIds(windowId, tabs, referenceTime);
 
         return tabs;
     }
@@ -427,7 +427,7 @@ public sealed class TerminalDatabase : IDisposable
     /// Recover copilot session IDs from earlier captures when the last capture lost them.
     /// Matches tabs by ordinal position within the same window.
     /// </summary>
-    void EnrichTabsWithHistoricalSessionIds(string windowId, List<CaptureTab> tabs)
+    void EnrichTabsWithHistoricalSessionIds(string windowId, List<CaptureTab> tabs, string? referenceTime = null)
     {
         // Find all distinct copilot session IDs ever seen for this window, with their ordinal and path
         using var cmd = _conn.CreateCommand();
@@ -465,7 +465,7 @@ public sealed class TerminalDatabase : IDisposable
         if (sessionByOrdinal.Count == 0)
         {
             // No history for this window — fall back to scanning all copilot sessions on disk
-            EnrichFromCopilotSessionStore(tabs);
+            EnrichFromCopilotSessionStore(tabs, referenceTime);
             return;
         }
 
@@ -514,15 +514,16 @@ public sealed class TerminalDatabase : IDisposable
         }
 
         // Final fallback: scan disk for any unmatched tabs
-        EnrichFromCopilotSessionStore(tabs);
+        EnrichFromCopilotSessionStore(tabs, referenceTime);
     }
 
     /// <summary>
     /// Last-resort enrichment: scan all copilot session-state directories on disk
-    /// and match tab titles to session summaries. Useful for OLD windows captured
-    /// before session ID tracking was reliable.
+    /// and match unmatched tabs by PATH (CWD) and TITLE, using nearest TIMESTAMP
+    /// to the window's reference time as tie-breaker. Restores session continuity
+    /// for closed windows captured before reliable session ID tracking.
     /// </summary>
-    static void EnrichFromCopilotSessionStore(List<CaptureTab> tabs)
+    static void EnrichFromCopilotSessionStore(List<CaptureTab> tabs, string? referenceTime = null)
     {
         var sessionsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -530,9 +531,22 @@ public sealed class TerminalDatabase : IDisposable
         if (!Directory.Exists(sessionsDir)) return;
 
         // Check if any tabs need enrichment
-        if (!tabs.Any(t => t.CopilotSessionId == null && !string.IsNullOrEmpty(t.Title))) return;
+        if (!tabs.Any(t => t.CopilotSessionId == null)) return;
 
-        // Build summary → (sessionId, cwd, updated) lookup from disk
+        DateTime? refTime = null;
+        if (!string.IsNullOrEmpty(referenceTime)
+            && DateTime.TryParse(referenceTime, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeLocal, out var parsedRef))
+        {
+            refTime = parsedRef;
+        }
+
+        // Collect already-claimed session IDs to avoid double-assignment
+        var claimed = new HashSet<string>(
+            tabs.Where(t => t.CopilotSessionId != null).Select(t => t.CopilotSessionId!),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Build sessions catalog from disk
         var diskSessions = new List<(string SessionId, string Summary, string Cwd, DateTime Updated)>();
         foreach (var dir in Directory.EnumerateDirectories(sessionsDir))
         {
@@ -540,10 +554,10 @@ public sealed class TerminalDatabase : IDisposable
             if (!File.Exists(ws)) continue;
             try
             {
-                string? id = Path.GetFileName(dir);
+                var id = Path.GetFileName(dir);
                 string? summary = null;
                 string? cwd = null;
-                DateTime updated = File.GetLastWriteTime(ws);
+                var updated = File.GetLastWriteTime(ws);
                 foreach (var line in File.ReadLines(ws))
                 {
                     var t = line.TrimStart();
@@ -552,47 +566,87 @@ public sealed class TerminalDatabase : IDisposable
                     else if (t.StartsWith("cwd: ", StringComparison.Ordinal))
                         cwd = t["cwd: ".Length..].Trim();
                 }
-                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(summary) && summary.Length >= 4)
-                    diskSessions.Add((id, summary, cwd ?? "", updated));
+                if (!string.IsNullOrEmpty(id))
+                    diskSessions.Add((id, summary ?? "", cwd ?? "", updated));
             }
             catch (IOException) { }
         }
 
         if (diskSessions.Count == 0) return;
 
-        // Sort by most recent for tie-breaking
-        diskSessions = [.. diskSessions.OrderByDescending(s => s.Updated)];
-
         foreach (var tab in tabs)
         {
             if (tab.CopilotSessionId != null) continue;
-            if (string.IsNullOrEmpty(tab.Title)) continue;
 
-            var cleanTitle = tab.Title.Replace("🤖", "", StringComparison.Ordinal).Trim();
-            if (cleanTitle.Length < 4) continue;
+            var cleanTitle = (tab.Title ?? "")
+                .Replace("🤖", "", StringComparison.Ordinal).Trim();
+            var tabPath = tab.Path ?? "";
+            var hasUsefulTitle = cleanTitle.Length >= 4;
+            var hasUsefulPath = !string.IsNullOrEmpty(tabPath);
 
-            // Try exact summary match first, then bidirectional contains
-            var match = diskSessions.FirstOrDefault(s =>
-                s.Summary.Equals(cleanTitle, StringComparison.OrdinalIgnoreCase));
-            if (match.SessionId == null)
+            if (!hasUsefulTitle && !hasUsefulPath) continue;
+
+            // Score every candidate session
+            (string SessionId, string Summary, string Cwd, DateTime Updated, double Score)? best = null;
+            foreach (var s in diskSessions)
             {
-                match = diskSessions.FirstOrDefault(s =>
-                    cleanTitle.Contains(s.Summary, StringComparison.OrdinalIgnoreCase)
-                    || s.Summary.Contains(cleanTitle, StringComparison.OrdinalIgnoreCase));
-            }
+                if (claimed.Contains(s.SessionId)) continue;
 
-            if (match.SessionId != null)
-            {
-                tab.HasCopilot = true;
-                tab.CopilotSessionId = match.SessionId;
-                tab.CopilotSummary = match.Summary;
-                if (string.IsNullOrEmpty(tab.Path) && !string.IsNullOrEmpty(match.Cwd))
+                double score = 0;
+
+                // Path match (strongest signal)
+                if (hasUsefulPath && !string.IsNullOrEmpty(s.Cwd))
                 {
-                    tab.Path = match.Cwd;
-                    tab.Folder = Path.GetFileName(match.Cwd);
-                    tab.DirExists = Directory.Exists(match.Cwd);
+                    if (tabPath.Equals(s.Cwd, StringComparison.OrdinalIgnoreCase))
+                        score += 100;
+                    else if (tabPath.StartsWith(s.Cwd, StringComparison.OrdinalIgnoreCase)
+                          || s.Cwd.StartsWith(tabPath, StringComparison.OrdinalIgnoreCase))
+                        score += 50;
                 }
+
+                // Title/summary match
+                if (hasUsefulTitle && !string.IsNullOrEmpty(s.Summary))
+                {
+                    if (cleanTitle.Equals(s.Summary, StringComparison.OrdinalIgnoreCase))
+                        score += 80;
+                    else if (cleanTitle.Contains(s.Summary, StringComparison.OrdinalIgnoreCase)
+                          || s.Summary.Contains(cleanTitle, StringComparison.OrdinalIgnoreCase))
+                        score += 40;
+                }
+
+                if (score == 0) continue;
+
+                // Timestamp proximity bonus (closer to refTime = higher bonus, max +20)
+                if (refTime.HasValue)
+                {
+                    var deltaHours = Math.Abs((s.Updated - refTime.Value).TotalHours);
+                    // 0h delta → +20, 24h → +10, 1week → 0
+                    score += Math.Max(0, 20 - (deltaHours * 20.0 / 168.0));
+                }
+                else
+                {
+                    // No reference time — prefer most recently updated
+                    score += Math.Max(0, 10 - (DateTime.Now - s.Updated).TotalDays * 0.1);
+                }
+
+                if (best == null || score > best.Value.Score)
+                    best = (s.SessionId, s.Summary, s.Cwd, s.Updated, score);
             }
+
+            // Require minimum score to avoid garbage matches
+            if (best == null || best.Value.Score < 40) continue;
+
+            tab.HasCopilot = true;
+            tab.CopilotSessionId = best.Value.SessionId;
+            if (!string.IsNullOrEmpty(best.Value.Summary))
+                tab.CopilotSummary = best.Value.Summary;
+            if (string.IsNullOrEmpty(tab.Path) && !string.IsNullOrEmpty(best.Value.Cwd))
+            {
+                tab.Path = best.Value.Cwd;
+                tab.Folder = Path.GetFileName(best.Value.Cwd);
+                tab.DirExists = Directory.Exists(best.Value.Cwd);
+            }
+            claimed.Add(best.Value.SessionId);
         }
     }
 
@@ -618,7 +672,7 @@ public sealed class TerminalDatabase : IDisposable
             var firstSeen = reader.GetString(1);
             var lastSeen = reader.GetString(2);
             var closedAt = reader.IsDBNull(3) ? null : reader.GetString(3);
-            var tabs = GetLastKnownTabs(id);
+            var tabs = GetLastKnownTabs(id, closedAt ?? lastSeen);
             if (tabs.Count > 0)
                 result.Add(new ClosedWindowRecord(id, firstSeen, lastSeen, closedAt, tabs));
         }
