@@ -49,10 +49,16 @@ public static class Windows
             return 1;
         }
 
-        var liveWins = data.Windows.Where(w => w.IsLive).ToList();
-        var closedWins = data.Windows.Where(w => !w.IsLive).ToList();
+        // Get closed windows from DB (with their last known tabs)
+        List<ClosedWindowRecord> closedFromDb;
+        using (var db = new TerminalDatabase(host.TsgDir))
+        {
+            closedFromDb = db.GetClosedWindowsWithTabs(5);
+        }
 
-        Console.WriteLine($"\n  🪟 Terminal Windows — {liveWins.Count} active, {closedWins.Count} recently closed");
+        var liveWins = data.Windows.Where(w => w.IsLive).ToList();
+
+        Console.WriteLine($"\n  🪟 Terminal Windows — {liveWins.Count} active, {closedFromDb.Count} recently closed");
         Console.Write($"  📅 {data.CapturedAt}  📑 {data.TotalTabs} tabs  🤖 {data.CopilotCount}");
 
         // Quality indicator
@@ -79,12 +85,35 @@ public static class Windows
             PrintCaptureWindows(liveWins, isActive: true);
         }
 
-        if (closedWins.Count > 0)
+        if (closedFromDb.Count > 0)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine("\n  ── Recently Closed ──");
             Console.ResetColor();
-            PrintCaptureWindows(closedWins, isActive: false);
+            foreach (var cw in closedFromDb)
+            {
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.Write($"  🔴 Window");
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write($"  [{cw.Id}]");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write($"  📑 {cw.Tabs.Count} tabs");
+                var copilotCount = cw.Tabs.Count(t => t.HasCopilot);
+                if (copilotCount > 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.Magenta;
+                    Console.Write($"  🤖 {copilotCount}");
+                }
+                Console.ResetColor();
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write($"     📅 Opened: {cw.FirstSeen}");
+                Console.Write($"  ❌ Closed: {cw.ClosedAt}");
+                Console.ResetColor();
+                Console.WriteLine();
+                foreach (var tab in cw.Tabs)
+                    PrintCaptureTab(tab, "     ");
+            }
         }
 
         Console.ForegroundColor = ConsoleColor.DarkGray;
@@ -576,7 +605,13 @@ public static class Windows
     static string BuildTabCommand(TabInfo tab, string shell)
     {
         if (tab.HasCopilot && tab.CopilotId != null)
+        {
+            // Restore copilot session with --resume and change to the session's CWD
+            var sessionDir = GetCopilotSessionCwd(tab.CopilotId);
+            if (!string.IsNullOrEmpty(sessionDir) && Directory.Exists(sessionDir))
+                return $"\"{shell}\" -NoExit -Command \"Set-Location '{sessionDir}'; copilot --resume={tab.CopilotId}\"";
             return $"\"{shell}\" -NoExit -Command \"copilot --resume={tab.CopilotId}\"";
+        }
         if (tab.HasCopilot)
             return $"\"{shell}\" -NoExit -Command \"copilot\"";
         return $"\"{shell}\"";
@@ -584,9 +619,36 @@ public static class Windows
 
     static string GetTabDir(TabInfo tab)
     {
+        // For copilot tabs, get CWD from the session workspace.yaml
+        if (tab.HasCopilot && tab.CopilotId != null)
+        {
+            var sessionDir = GetCopilotSessionCwd(tab.CopilotId);
+            if (!string.IsNullOrEmpty(sessionDir) && Directory.Exists(sessionDir))
+                return sessionDir;
+        }
         if (!string.IsNullOrEmpty(tab.Path) && tab.DirExists)
             return tab.Path;
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
+
+    /// <summary>Read the CWD from a copilot session's workspace.yaml</summary>
+    static string? GetCopilotSessionCwd(string sessionId)
+    {
+        var wsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".copilot", "session-state", sessionId, "workspace.yaml");
+        if (!File.Exists(wsPath)) return null;
+        try
+        {
+            foreach (var line in File.ReadLines(wsPath))
+            {
+                var trimmed = line.TrimStart();
+                if (trimmed.StartsWith("cwd: ", StringComparison.Ordinal))
+                    return trimmed["cwd: ".Length..].Trim();
+            }
+        }
+        catch (IOException) { }
+        return null;
     }
 
     static string FindPwsh()

@@ -98,6 +98,12 @@ public static class StateCapture
 
         // Load copilot sessions
         var copilotSessions = LoadCopilotSessions();
+
+        // Scan running processes for copilot --resume=<sessionId> with parent PID info
+        var activeResumeIds = ScanRunningCopilotSessions();
+        // Build map: WT process PID → list of resume session IDs (for process-tree matching)
+        var wtSessionMap = BuildTerminalSessionMap(activeResumeIds);
+
         var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
         // Read existing window identities from DB for matching
@@ -115,40 +121,254 @@ public static class StateCapture
         {
             // state.json tabs indexed for supplementary path/session info
             var stateTabs = layouts.Count > 0 ? ParseTabs(layouts[0], copilotSessions) : [];
+            var matchedSessionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Build set of active session summaries for detecting idle copilot tabs (no 🤖 in title)
+            var activeSessionSummaries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (rid, _) in activeResumeIds)
+            {
+                var sess = copilotSessions.FirstOrDefault(cs =>
+                    cs.SessionId.Equals(rid, StringComparison.OrdinalIgnoreCase));
+                if (sess != null && !string.IsNullOrEmpty(sess.Summary))
+                    activeSessionSummaries.TryAdd(sess.Summary, rid);
+            }
 
             foreach (var liveWin in liveWindowTabs)
             {
+                // Get sessions running in this WT window (by process tree)
+                List<string>? windowSessions = null;
+                if (liveWin.ProcessId > 0)
+                    wtSessionMap.TryGetValue(liveWin.ProcessId, out windowSessions);
+
+                // Build direct tab-position → session-ID map from WT child processes
+                Dictionary<int, string>? tabPositionMap = null;
+                if (liveWin.ProcessId > 0)
+                    tabPositionMap = BuildTabPositionSessionMap(liveWin.ProcessId);
+
                 var tabs = new List<CaptureTab>();
+                var tabIndex = 0;
                 foreach (var tabName in liveWin.TabNames)
                 {
                     var isCopilot = tabName.Contains("🤖", StringComparison.Ordinal);
+
+                    // Check if tab-position map directly assigns a session to this tab
+                    string? positionSessionId = null;
+                    if (tabPositionMap != null && tabPositionMap.TryGetValue(tabIndex, out var posId))
+                    {
+                        positionSessionId = posId;
+                        if (!isCopilot) isCopilot = true;
+                    }
+
+                    // Also detect idle copilot tabs: title matches a running copilot session summary
+                    if (!isCopilot && windowSessions != null)
+                    {
+                        foreach (var sid in windowSessions)
+                        {
+                            if (matchedSessionIds.Contains(sid)) continue;
+                            var session = copilotSessions.FirstOrDefault(cs =>
+                                cs.SessionId.Equals(sid, StringComparison.OrdinalIgnoreCase));
+                            if (session != null && !string.IsNullOrEmpty(session.Summary)
+                                && tabName.Contains(session.Summary, StringComparison.OrdinalIgnoreCase))
+                            {
+                                isCopilot = true;
+                                break;
+                            }
+                        }
+                    }
+                    // Also check if tab title exactly matches any active session summary
+                    if (!isCopilot && activeSessionSummaries.ContainsKey(tabName.Trim()))
+                        isCopilot = true;
 
                     // Try to match live tab to a state.json tab by title for path info
                     var stateMatch = stateTabs.FirstOrDefault(st =>
                         !string.IsNullOrEmpty(st.Title) && tabName.Contains(st.Title, StringComparison.OrdinalIgnoreCase));
 
-                    // Also try path-based matching from copilot sessions
-                    CopilotSession? copilotMatch = null;
+                    string? copilotSessionId = null;
+                    string? copilotSummary = null;
+                    string? tabPath = stateMatch?.Path ?? "";
+                    string? cmdline = stateMatch?.Commandline ?? "";
+
                     if (isCopilot)
                     {
-                        // Find copilot session that might match this tab's directory
-                        copilotMatch = stateMatch != null && !string.IsNullOrEmpty(stateMatch.Path)
-                            ? copilotSessions.FirstOrDefault(cs =>
-                                cs.Cwd.Equals(stateMatch.Path, StringComparison.OrdinalIgnoreCase))
-                            : null;
+                        // Strategy 0 (MOST RELIABLE): Direct tab-position mapping from WT child processes
+                        if (positionSessionId != null && !matchedSessionIds.Contains(positionSessionId))
+                        {
+                            copilotSessionId = positionSessionId;
+                            matchedSessionIds.Add(positionSessionId);
+                            var session = copilotSessions.FirstOrDefault(cs =>
+                                cs.SessionId.Equals(positionSessionId, StringComparison.OrdinalIgnoreCase));
+                            if (session != null)
+                            {
+                                copilotSummary = session.Summary;
+                                if (string.IsNullOrEmpty(tabPath))
+                                    tabPath = session.Cwd;
+                            }
+                        }
+
+                        // Strategy 1: Extract --resume=<id> from state.json commandline
+                        if (copilotSessionId == null && !string.IsNullOrEmpty(cmdline))
+                            copilotSessionId = ExtractResumeId(cmdline);
+
+                        // Strategy 2: Match by summary text in the UIA tab name (exact or contained)
+                        if (copilotSessionId == null)
+                        {
+                            var summaryMatch = copilotSessions
+                                .Where(cs => !string.IsNullOrEmpty(cs.Summary)
+                                    && (tabName.Contains(cs.Summary, StringComparison.OrdinalIgnoreCase)
+                                        || cs.Summary.Contains(tabName.Trim(), StringComparison.OrdinalIgnoreCase)))
+                                .OrderByDescending(cs => cs.Updated)
+                                .FirstOrDefault();
+                            if (summaryMatch != null)
+                            {
+                                copilotSessionId = summaryMatch.SessionId;
+                                copilotSummary = summaryMatch.Summary;
+                                if (string.IsNullOrEmpty(tabPath))
+                                    tabPath = summaryMatch.Cwd;
+                            }
+                        }
+
+                        // Strategy 3: Process-tree matching — use WT PID to find copilot sessions
+                        if (copilotSessionId == null && windowSessions != null)
+                        {
+                            var cleanTabName = tabName.Replace("🤖", "", StringComparison.Ordinal).Trim();
+
+                            // 3a: Match by summary (full or partial/truncated)
+                            foreach (var sid in windowSessions)
+                            {
+                                if (matchedSessionIds.Contains(sid)) continue;
+                                var session = copilotSessions.FirstOrDefault(cs =>
+                                    cs.SessionId.Equals(sid, StringComparison.OrdinalIgnoreCase));
+                                if (session == null || string.IsNullOrEmpty(session.Summary)) continue;
+
+                                if (tabName.Contains(session.Summary, StringComparison.OrdinalIgnoreCase)
+                                    || session.Summary.Contains(cleanTabName, StringComparison.OrdinalIgnoreCase)
+                                    || (cleanTabName.Length >= 4 && session.Summary.StartsWith(cleanTabName, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    copilotSessionId = sid;
+                                    copilotSummary = session.Summary;
+                                    tabPath = session.Cwd;
+                                    matchedSessionIds.Add(sid);
+                                    break;
+                                }
+                            }
+
+                            // 3b: Match by CWD — if tab has a known path, find session with same CWD
+                            if (copilotSessionId == null && !string.IsNullOrEmpty(tabPath))
+                            {
+                                foreach (var sid in windowSessions)
+                                {
+                                    if (matchedSessionIds.Contains(sid)) continue;
+                                    var session = copilotSessions.FirstOrDefault(cs =>
+                                        cs.SessionId.Equals(sid, StringComparison.OrdinalIgnoreCase));
+                                    if (session != null && !string.IsNullOrEmpty(session.Cwd)
+                                        && tabPath.Equals(session.Cwd, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        copilotSessionId = sid;
+                                        copilotSummary = session.Summary;
+                                        matchedSessionIds.Add(sid);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 3c: Elimination — only 1 unclaimed copilot tab + 1 unclaimed session
+                            if (copilotSessionId == null)
+                            {
+                                var unclaimed = windowSessions.Where(s => !matchedSessionIds.Contains(s)).ToList();
+                                if (unclaimed.Count == 1)
+                                {
+                                    var sid = unclaimed[0];
+                                    var session = copilotSessions.FirstOrDefault(cs =>
+                                        cs.SessionId.Equals(sid, StringComparison.OrdinalIgnoreCase));
+                                    copilotSessionId = sid;
+                                    copilotSummary = session?.Summary;
+                                    tabPath = session?.Cwd ?? tabPath;
+                                    matchedSessionIds.Add(sid);
+                                }
+                            }
+                        }
+
+                        // Strategy 4: Fallback — try all active resume IDs with summary matching
+                        if (copilotSessionId == null)
+                        {
+                            var cleanTabName = tabName.Replace("🤖", "", StringComparison.Ordinal).Trim();
+                            foreach (var (rid, _) in activeResumeIds)
+                            {
+                                if (matchedSessionIds.Contains(rid)) continue;
+                                var session = copilotSessions.FirstOrDefault(cs =>
+                                    cs.SessionId.Equals(rid, StringComparison.OrdinalIgnoreCase));
+                                if (session != null && !string.IsNullOrEmpty(session.Summary))
+                                {
+                                    if (tabName.Contains(session.Summary, StringComparison.OrdinalIgnoreCase)
+                                        || session.Summary.Contains(cleanTabName, StringComparison.OrdinalIgnoreCase)
+                                        || (cleanTabName.Length >= 4 && session.Summary.StartsWith(cleanTabName, StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        copilotSessionId = rid;
+                                        copilotSummary = session.Summary;
+                                        tabPath = session.Cwd;
+                                        matchedSessionIds.Add(rid);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Strategy 5: Match by CWD directory against all sessions
+                        if (copilotSessionId == null && !string.IsNullOrEmpty(tabPath))
+                        {
+                            var cwdMatch = FindBestCopilotSession(tabPath, copilotSessions);
+                            if (cwdMatch != null)
+                            {
+                                copilotSessionId = cwdMatch.SessionId;
+                                copilotSummary = cwdMatch.Summary;
+                            }
+                        }
+
+                        // Strategy 6: Match all state.json copilot tabs' commandlines
+                        if (copilotSessionId == null)
+                        {
+                            foreach (var st in stateTabs.Where(s => s.HasCopilot && !string.IsNullOrEmpty(s.Commandline)))
+                            {
+                                var rid = ExtractResumeId(st.Commandline);
+                                if (rid != null)
+                                {
+                                    var session = copilotSessions.FirstOrDefault(cs =>
+                                        cs.SessionId.Equals(rid, StringComparison.OrdinalIgnoreCase));
+                                    if (session != null && !string.IsNullOrEmpty(session.Summary)
+                                        && tabName.Contains(session.Summary, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        copilotSessionId = rid;
+                                        copilotSummary = session.Summary;
+                                        if (string.IsNullOrEmpty(tabPath))
+                                            tabPath = session.Cwd;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Get summary from session if we have an ID but no summary yet
+                        if (copilotSessionId != null && string.IsNullOrEmpty(copilotSummary))
+                        {
+                            var session = copilotSessions.FirstOrDefault(cs =>
+                                cs.SessionId.Equals(copilotSessionId, StringComparison.OrdinalIgnoreCase));
+                            copilotSummary = session?.Summary;
+                        }
                     }
 
                     tabs.Add(new CaptureTab
                     {
                         Title = tabName,
-                        Path = stateMatch?.Path ?? "",
+                        Path = tabPath ?? "",
                         TabType = isCopilot ? "copilot" : "shell",
                         HasCopilot = isCopilot,
-                        CopilotSessionId = copilotMatch?.SessionId,
-                        Commandline = stateMatch?.Commandline ?? "",
+                        CopilotSessionId = copilotSessionId,
+                        CopilotSummary = copilotSummary,
+                        Commandline = cmdline ?? "",
                         IsLiveDetected = true,
                         Panes = []
                     });
+                    tabIndex++;
                 }
 
                 totalTabs += tabs.Count;
@@ -349,7 +569,7 @@ public static class StateCapture
         }
     }
 
-    public sealed record LiveWindowInfo(string Title, List<string> TabNames);
+    public sealed record LiveWindowInfo(string Title, List<string> TabNames, int ProcessId);
 
     static List<CaptureTab> ParseTabs(JsonElement layout, List<CopilotSession> copilotSessions)
     {
@@ -370,19 +590,34 @@ public static class StateCapture
 
             var tabType = DetectTabType(cmdline, title);
             var dirExists = !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
-            var copilot = FindBestCopilotSession(dir, copilotSessions);
             var folder = string.IsNullOrEmpty(dir) ? "(no dir)" : Path.GetFileName(dir);
+
+            // Extract session ID from commandline first (most reliable)
+            var resumeId = ExtractResumeId(cmdline);
+            CopilotSession? copilot = null;
+            var hasCopilot = tabType == "copilot" || resumeId != null;
+
+            if (resumeId != null)
+            {
+                // Direct match by session ID from --resume=
+                copilot = copilotSessions.FirstOrDefault(s =>
+                    s.SessionId.Equals(resumeId, StringComparison.OrdinalIgnoreCase));
+                hasCopilot = true;
+            }
+
+            // Fallback to CWD matching
+            copilot ??= FindBestCopilotSession(dir, copilotSessions);
 
             var tab = new CaptureTab
             {
                 Path = dir,
                 Folder = folder,
                 Title = title,
-                TabType = tabType,
+                TabType = hasCopilot ? "copilot" : tabType,
                 Commandline = cmdline,
                 DirExists = string.IsNullOrEmpty(dir) || dirExists,
-                HasCopilot = copilot != null,
-                CopilotSessionId = copilot?.SessionId,
+                HasCopilot = hasCopilot || copilot != null,
+                CopilotSessionId = resumeId ?? copilot?.SessionId,
                 CopilotSummary = copilot?.Summary
             };
 
@@ -398,6 +633,27 @@ public static class StateCapture
         }
 
         return tabs;
+    }
+
+    /// <summary>Extract session ID from commandline like: copilot --resume=abc-def-123</summary>
+    static string? ExtractResumeId(string cmdline)
+    {
+        if (string.IsNullOrEmpty(cmdline)) return null;
+
+        // Match --resume=<guid-like-id>
+        var idx = cmdline.IndexOf("--resume=", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return null;
+
+        var start = idx + "--resume=".Length;
+        if (start >= cmdline.Length) return null;
+
+        // Session IDs are UUIDs: read until whitespace or quote
+        var end = start;
+        while (end < cmdline.Length && !char.IsWhiteSpace(cmdline[end]) && cmdline[end] != '"' && cmdline[end] != '\'')
+            end++;
+
+        var id = cmdline[start..end];
+        return id.Length > 4 ? id : null; // Sanity: must be meaningful
     }
 
     static string DetectTabType(string cmdline, string title)
@@ -432,6 +688,172 @@ public static class StateCapture
         }
 
         return sessions;
+    }
+
+    /// <summary>
+    /// Scan running pwsh processes for copilot --resume=&lt;sessionId&gt; commandlines.
+    /// Returns list of (SessionId, ProcessId) pairs for process-tree matching.
+    /// </summary>
+    static List<(string SessionId, int Pid)> ScanRunningCopilotSessions()
+    {
+        var results = new List<(string SessionId, int Pid)>();
+        try
+        {
+            var shell = FindPwshPath();
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = shell,
+                Arguments = "-NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\"Name = 'pwsh.exe'\\\" | Where-Object { $_.CommandLine -like '*copilot*--resume*' } | ForEach-Object { '{0}|{1}' -f $_.ProcessId, $_.CommandLine }\"",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return results;
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(10000);
+
+            if (string.IsNullOrWhiteSpace(output)) return results;
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.Trim();
+                var sep = trimmed.IndexOf('|', StringComparison.Ordinal);
+                if (sep <= 0) continue;
+                if (!int.TryParse(trimmed[..sep], out var pid)) continue;
+                var id = ExtractResumeId(trimmed[(sep + 1)..]);
+                if (id != null)
+                    results.Add((id, pid));
+            }
+        }
+        catch (Exception) { /* Non-critical */ }
+        return results;
+    }
+
+    /// <summary>
+    /// Build a map from Windows Terminal PID → list of copilot session IDs
+    /// by tracing each copilot pwsh process's parent chain up to WindowsTerminal.exe.
+    /// </summary>
+    static Dictionary<int, List<string>> BuildTerminalSessionMap(List<(string SessionId, int Pid)> copilotProcesses)
+    {
+        var map = new Dictionary<int, List<string>>();
+        foreach (var (sessionId, pid) in copilotProcesses)
+        {
+            var wtPid = FindParentTerminalPid(pid);
+            if (wtPid > 0)
+            {
+                if (!map.TryGetValue(wtPid, out var list))
+                {
+                    list = [];
+                    map[wtPid] = list;
+                }
+                list.Add(sessionId);
+            }
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// Build a per-tab-position map of copilot session IDs for a specific WT window.
+    /// Enumerates WT child shell processes (pwsh/cmd) sorted by creation time,
+    /// matching tab order in the terminal. Each shell process with --resume=ID
+    /// gives a direct tab-position → session-ID mapping.
+    /// </summary>
+    static Dictionary<int, string> BuildTabPositionSessionMap(int wtPid)
+    {
+        var map = new Dictionary<int, string>();
+        try
+        {
+            var shell = FindPwshPath();
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = shell,
+                Arguments = $"-NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ParentProcessId={wtPid}' | Where-Object {{ $_.Name -match 'pwsh|cmd|powershell' }} | Sort-Object CreationDate | ForEach-Object {{ '{{0}}|{{1}}' -f $_.ProcessId, $_.CommandLine }}\"",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return map;
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(10000);
+            if (string.IsNullOrWhiteSpace(output)) return map;
+
+            var tabIndex = 0;
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.Trim();
+                var sep = trimmed.IndexOf('|', StringComparison.Ordinal);
+                if (sep <= 0) { tabIndex++; continue; }
+                var cmdLine = trimmed[(sep + 1)..];
+                var sessionId = ExtractResumeId(cmdLine);
+                if (sessionId != null)
+                    map[tabIndex] = sessionId;
+                tabIndex++;
+            }
+        }
+        catch (Exception) { /* Non-critical */ }
+        return map;
+    }
+
+    /// <summary>Trace parent PID chain from a process up to WindowsTerminal.exe</summary>
+    static int FindParentTerminalPid(int pid)
+    {
+        try
+        {
+            var current = pid;
+            for (var depth = 0; depth < 10; depth++)
+            {
+                using var proc = System.Diagnostics.Process.GetProcessById(current);
+                var parentPid = GetParentPid(current);
+                if (parentPid <= 0) break;
+
+                try
+                {
+                    using var parent = System.Diagnostics.Process.GetProcessById(parentPid);
+                    if (parent.ProcessName.Equals("WindowsTerminal", StringComparison.OrdinalIgnoreCase))
+                        return parentPid;
+                }
+                catch (Exception) { break; }
+
+                current = parentPid;
+            }
+        }
+        catch (Exception) { }
+        return 0;
+    }
+
+    [DllImport("ntdll.dll")]
+    static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass,
+        ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    static int GetParentPid(int pid)
+    {
+        try
+        {
+            using var proc = System.Diagnostics.Process.GetProcessById(pid);
+            var pbi = new PROCESS_BASIC_INFORMATION();
+            var status = NtQueryInformationProcess(proc.Handle, 0, ref pbi, Marshal.SizeOf(pbi), out _);
+            return status == 0 ? checked((int)pbi.InheritedFromUniqueProcessId) : 0;
+        }
+        catch (Exception) { return 0; }
+    }
+
+    static string FindPwshPath()
+    {
+        var paths = new[] { @"C:\Program Files\PowerShell\7\pwsh.exe", @"C:\Program Files (x86)\PowerShell\7\pwsh.exe" };
+        return paths.FirstOrDefault(File.Exists) ?? "pwsh.exe";
     }
 
     static string? ExtractYamlField(string content, string field)

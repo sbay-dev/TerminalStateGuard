@@ -19,6 +19,7 @@ static class UiaComHelper
     const int UIA_NamePropertyId = 30005;
     const int UIA_ControlTypePropertyId = 30003;
     const int UIA_TabItemControlTypeId = 50019;
+    const int UIA_ProcessIdPropertyId = 30002;
 
     // TreeScope
     const int TreeScope_Children = 0x2;
@@ -72,6 +73,7 @@ static class UiaComHelper
                         try
                         {
                             var windowTitle = GetElementName(pWindow);
+                            var windowPid = GetElementProcessId(pWindow);
 
                             // Create condition: ControlType == TabItem
                             var pTabCond = automation.CreatePropertyConditionInt(UIA_ControlTypePropertyId, UIA_TabItemControlTypeId);
@@ -101,7 +103,7 @@ static class UiaComHelper
                                         }
                                     }
 
-                                    result.Add(new StateCapture.LiveWindowInfo(windowTitle, tabNames));
+                                    result.Add(new StateCapture.LiveWindowInfo(windowTitle, tabNames, windowPid));
                                 }
                                 finally
                                 {
@@ -181,6 +183,17 @@ static class UiaComHelper
         return name ?? "";
     }
 
+    /// <summary>Get ProcessId from IUIAutomationElement (vtable index 20: get_CurrentProcessId)</summary>
+    static int GetElementProcessId(IntPtr pElement)
+    {
+        var vtable = Marshal.ReadIntPtr(pElement);
+        // IUIAutomationElement::get_CurrentProcessId is at vtable index 20
+        var pfn = Marshal.ReadIntPtr(vtable, 20 * IntPtr.Size);
+        var fn = Marshal.GetDelegateForFunctionPointer<GetProcessIdDelegate>(pfn);
+        var hr = fn(pElement, out var pid);
+        return hr == 0 ? pid : 0;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     delegate int FindAllDelegate(IntPtr self, int scope, IntPtr condition, out IntPtr found);
 
@@ -192,6 +205,9 @@ static class UiaComHelper
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     delegate int GetNameDelegate(IntPtr self, out IntPtr name);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    delegate int GetProcessIdDelegate(IntPtr self, out int pid);
 
     // Wrapper for IUIAutomation interface
     readonly struct UiaAutomation(IntPtr pAutomation)

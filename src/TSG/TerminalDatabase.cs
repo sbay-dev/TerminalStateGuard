@@ -363,7 +363,8 @@ public sealed class TerminalDatabase : IDisposable
 
     /// <summary>
     /// Get the last known tabs for a window from the most recent capture where it had tabs.
-    /// Essential for restoring closed windows.
+    /// Enriches tabs with copilot session IDs from earlier captures if the last capture lost them
+    /// (copilot process may have ended before window closed).
     /// </summary>
     public List<CaptureTab> GetLastKnownTabs(string windowId)
     {
@@ -414,7 +415,98 @@ public sealed class TerminalDatabase : IDisposable
                 tabs.Add(tab);
             }
         }
+
+        // Enrich: if any tab lost its copilot session ID (copilot ended before window closed),
+        // recover it from earlier captures for the same window
+        EnrichTabsWithHistoricalSessionIds(windowId, tabs);
+
         return tabs;
+    }
+
+    /// <summary>
+    /// Recover copilot session IDs from earlier captures when the last capture lost them.
+    /// Matches tabs by ordinal position within the same window.
+    /// </summary>
+    void EnrichTabsWithHistoricalSessionIds(string windowId, List<CaptureTab> tabs)
+    {
+        // Find all distinct copilot session IDs ever seen for this window, with their ordinal and path
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT ct.ordinal, ct.copilot_session_id, ct.copilot_summary, ct.path, ct.title
+            FROM capture_tabs ct
+            WHERE ct.window_id = $wid
+              AND ct.copilot_session_id IS NOT NULL
+              AND ct.parent_ordinal IS NULL
+            ORDER BY ct.capture_id DESC;
+            """;
+        cmd.Parameters.AddWithValue("$wid", windowId);
+        using var reader = cmd.ExecuteReader();
+
+        // Build a map: ordinal → best (most recent) session info
+        var sessionByOrdinal = new Dictionary<int, (string SessionId, string? Summary, string Path, string Title)>();
+        // Also track all session IDs seen (for fallback matching by title)
+        var sessionByTitle = new Dictionary<string, (string SessionId, string? Summary, string Path)>();
+
+        while (reader.Read())
+        {
+            var ordinal = reader.GetInt32(0);
+            var sessionId = reader.GetString(1);
+            var summary = reader.IsDBNull(2) ? null : reader.GetString(2);
+            var path = reader.IsDBNull(3) ? "" : reader.GetString(3);
+            var title = reader.IsDBNull(4) ? "" : reader.GetString(4);
+
+            sessionByOrdinal.TryAdd(ordinal, (sessionId, summary, path, title));
+
+            // Track by copilot summary for title-based matching
+            if (!string.IsNullOrEmpty(summary))
+                sessionByTitle.TryAdd(summary, (sessionId, summary, path));
+        }
+
+        if (sessionByOrdinal.Count == 0) return;
+
+        // Enrich tabs that are missing session IDs
+        for (var i = 0; i < tabs.Count; i++)
+        {
+            var tab = tabs[i];
+            if (tab.CopilotSessionId != null) continue;
+
+            // Strategy 1: match by ordinal position
+            if (sessionByOrdinal.TryGetValue(i, out var byOrdinal))
+            {
+                tab.HasCopilot = true;
+                tab.CopilotSessionId = byOrdinal.SessionId;
+                tab.CopilotSummary = byOrdinal.Summary;
+                if (string.IsNullOrEmpty(tab.Path) && !string.IsNullOrEmpty(byOrdinal.Path))
+                {
+                    tab.Path = byOrdinal.Path;
+                    tab.Folder = Path.GetFileName(byOrdinal.Path);
+                    tab.DirExists = Directory.Exists(byOrdinal.Path);
+                }
+                continue;
+            }
+
+            // Strategy 2: match by title containing copilot summary
+            if (!string.IsNullOrEmpty(tab.Title))
+            {
+                foreach (var (summary, info) in sessionByTitle)
+                {
+                    if (tab.Title.Contains(summary, StringComparison.OrdinalIgnoreCase) ||
+                        summary.Contains(tab.Title, StringComparison.OrdinalIgnoreCase))
+                    {
+                        tab.HasCopilot = true;
+                        tab.CopilotSessionId = info.SessionId;
+                        tab.CopilotSummary = info.Summary;
+                        if (string.IsNullOrEmpty(tab.Path) && !string.IsNullOrEmpty(info.Path))
+                        {
+                            tab.Path = info.Path;
+                            tab.Folder = Path.GetFileName(info.Path);
+                            tab.DirExists = Directory.Exists(info.Path);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
