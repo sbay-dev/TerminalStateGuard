@@ -22,7 +22,14 @@ public static class CommandRegistry
             ["recover"]   = args => runner.RunAsync("recover", args),
             ["restore"]   = args => runner.RunAsync("restore", args),
             ["focus"]     = args => runner.RunAsync("focus", args),
+            ["snapshots"] = args => Snapshots.RunAsync(host, args),
+            ["windows"]   = args => Windows.RunAsync(host, args),
+            ["capture"]   = args => StateCapture.RunAsync(host, args),
+            ["processes"] = args => ProcessManager.RunAsync(host, args),
+            ["ps"]        = args => ProcessManager.RunAsync(host, args),
+            ["db"]        = args => DbQuery.RunAsync(host, args),
             ["doctor"]    = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
+            ["config"]    = args => Configuration.RunAsync(host, args),
             ["version"]   = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
             ["help"]      = _ => { PrintHelp(); return Task.FromResult(0); },
             ["--help"]    = _ => { PrintHelp(); return Task.FromResult(0); },
@@ -42,7 +49,7 @@ public static class CommandRegistry
             ██║   ╚════██║██║   ██║
             ██║   ███████║╚██████╔╝
             ╚═╝   ╚══════╝ ╚═════╝ 
-          ⚡ Terminal State Guard v1.2 ⚡
+          ⚡ Terminal State Guard v2.0 ⚡
           Platform: {os} | .NET {Environment.Version}
 
           USAGE:
@@ -56,6 +63,23 @@ public static class CommandRegistry
             tsg focus         Focus ALL resources on one stuck process (Admin)
             tsg focus <PID>   Focus on specific PID
             tsg focus --undo  Restore normal priorities
+            tsg snapshots     List all saved terminal snapshots
+            tsg snapshots --all  Show all with tab details
+            tsg windows       Show active & recently closed windows with tabs
+            tsg windows -i    Interactive dashboard (restore, snapshot, processes)
+            tsg windows --history  Browse window history
+            tsg windows --restore  Restore windows with all their tabs
+            tsg capture       Capture current terminal state to SQLite
+            tsg capture -q    Capture quietly (for automation)
+            tsg processes     Show dev processes with ports & resource usage
+            tsg ps            Alias for tsg processes
+            tsg ps -i         Interactive process manager with navigation
+            tsg ps --orphans  Show only orphaned background processes
+            tsg ps --ports    Show only port-binding processes
+            tsg ps --kill <PID>       Kill a process (with confirmation)
+            tsg ps --kill-tree <PID>  Kill process tree
+            tsg db "<SQL>"    Query terminal database (read-only)
+            tsg config        Show/set configuration (max-snapshots)
             tsg doctor        Diagnose environment issues
             tsg version       Show version
 
@@ -63,6 +87,7 @@ public static class CommandRegistry
             Ctrl+Alt+B  Boost    Ctrl+Alt+M  Monitor
             Ctrl+Alt+S  Status   Ctrl+Alt+F  Recover
             Ctrl+Alt+R  Restore  Ctrl+Alt+H  Help
+            Ctrl+Alt+P  Processes
 
           SAFETY:
             ⛔ Monitor is READ-ONLY — never modifies Copilot files

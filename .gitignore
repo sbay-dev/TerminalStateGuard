@@ -4,3 +4,4 @@ artifacts/
 *.nupkg
 *.user
 .vs/
+test_uia.cs

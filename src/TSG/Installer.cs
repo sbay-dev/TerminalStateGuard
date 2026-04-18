@@ -38,6 +38,9 @@ public class Installer(IPlatformHost host)
             tsg recover     🔄 Recover sessions
             tsg restore     🔄 Restore priorities
             tsg focus        🎯 Focus ALL resources on stuck process
+            tsg snapshots   📸 List all saved snapshots
+            tsg windows     🪟 View & restore terminal windows
+            tsg config      ⚙️  Configuration (max-snapshots)
             tsg doctor      🩺 Environment diagnostics
 
           ═══ SHORTCUTS ═══

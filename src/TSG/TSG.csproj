@@ -6,6 +6,7 @@
     <RootNamespace>TSG</RootNamespace>
     <AssemblyName>tsg</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
 
     <!-- Security & Code Quality -->
@@ -17,17 +18,17 @@
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <NuGetAuditMode>all</NuGetAuditMode>
     <!-- Suppress non-applicable for CLI tool -->
-    <NoWarn>CA1303;CA2007;CA1724;CA1852;CA1515;CA1308</NoWarn>
+    <NoWarn>CA1303;CA2007;CA1724;CA1852;CA1515;CA1308;CA2227;CA1002;CA2100;CA5392;CA1034;CA1031;CA1823</NoWarn>
 
     <!-- NuGet Tool -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tsg</ToolCommandName>
     <PackageId>TerminalStateGuard</PackageId>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Authors>sbay-dev</Authors>
     <Company>sbay-dev</Company>
-    <Description>TSG — Terminal State Guard: Cross-platform CLI for Copilot performance boosting, safe read-only monitoring, session recovery and terminal integration.</Description>
-    <PackageTags>copilot;github-copilot;terminal;performance;monitor;session-recovery;windows-terminal;linux;cli;dotnet-tool</PackageTags>
+    <Description>TSG — Terminal State Guard: Complete terminal intelligence platform with real-time window tracking (COM IUIAutomation), interactive process manager, SQLite state database, session recovery, and Copilot performance optimization.</Description>
+    <PackageTags>copilot;github-copilot;terminal;performance;monitor;session-recovery;windows-terminal;process-manager;sqlite;uiautomation;linux;cli;dotnet-tool</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://sbay-dev.github.io/TerminalStateGuard</PackageProjectUrl>
     <RepositoryUrl>https://github.com/sbay-dev/TerminalStateGuard</RepositoryUrl>
@@ -38,5 +39,9 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <EmbeddedResource Include="Scripts\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.6" />
   </ItemGroup>
 </Project>

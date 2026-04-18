@@ -97,6 +97,36 @@ public static class Diagnostics
             Check("✅", $"Terminal state: {layouts.GetArrayLength()} windows, {tabs} tabs");
         }
 
+        // Snapshot retention
+        var snapDir = Path.Combine(host.HomeDir, ".copilotAccel", "terminal-snapshots");
+        if (Directory.Exists(snapDir))
+        {
+            var snapCount = Directory.GetFiles(snapDir, "202*.json").Length;
+            var configPath = Path.Combine(host.TsgDir, "tsg-config.json");
+            var maxSnap = 50;
+            var source = "default";
+            var envVal = Environment.GetEnvironmentVariable("TSG_MAX_SNAPSHOTS");
+            if (envVal is not null && int.TryParse(envVal, out var envMax))
+            {
+                maxSnap = envMax;
+                source = "env";
+            }
+            else if (File.Exists(configPath))
+            {
+                try
+                {
+                    using var cfgDoc = JsonDocument.Parse(await File.ReadAllTextAsync(configPath));
+                    if (cfgDoc.RootElement.TryGetProperty("MaxSnapshots", out var ms))
+                    {
+                        maxSnap = ms.GetInt32();
+                        source = "config";
+                    }
+                }
+                catch (JsonException) { /* use default */ }
+            }
+            Check("✅", $"Snapshots: {snapCount}/{maxSnap} ({source})");
+        }
+
         Console.WriteLine(issues == 0
             ? "\n  🎉 All checks passed!\n"
             : $"\n  ⚠️ {issues} issue(s) found\n");

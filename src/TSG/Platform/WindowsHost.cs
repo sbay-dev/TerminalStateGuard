@@ -52,37 +52,62 @@ public class WindowsHost : IPlatformHost
             "profiles": [
                 {
                     "name": "\u26a1 TSG Boost [Admin]",
+                    "icon": "\u26a1",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process '{{pwsh}}' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\\"{{tsgDir}}\\CopilotBoost.ps1\\\" -Mode Boost'\"",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83d\udcca TSG Monitor",
+                    "icon": "\ud83d\udcca",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Monitor",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83d\udccb TSG Status",
+                    "icon": "\ud83d\udccb",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\CopilotBoost.ps1\" -Mode Status",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83d\udd04 TSG Recover",
+                    "icon": "\ud83d\udd04",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\RecoverSessions.ps1\"",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83d\udd04 TSG Restore [Admin]",
+                    "icon": "\ud83d\udee1\ufe0f",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"Start-Process '{{pwsh}}' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \\\"{{tsgDir}}\\CopilotBoost.ps1\\\" -Mode Restore'\"",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83c\udfaf TSG Focus [Admin]",
+                    "icon": "\ud83c\udfaf",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -File \"{{tsgDir}}\\Focus.ps1\"",
                     "startingDirectory": "%USERPROFILE%"
                 },
                 {
                     "name": "\ud83e\ude7a TSG Doctor",
+                    "icon": "\ud83e\ude7a",
                     "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg doctor; Read-Host 'Press Enter to close'\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\uddbc\ufe0f TSG Windows",
+                    "icon": "\ud83d\uddbc\ufe0f",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg windows --interactive\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udcf8 TSG Snapshots",
+                    "icon": "\ud83d\udcf8",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg snapshots; Read-Host 'Press Enter to close'\"",
+                    "startingDirectory": "%USERPROFILE%"
+                },
+                {
+                    "name": "\ud83d\udd27 TSG Processes",
+                    "icon": "\ud83d\udd27",
+                    "commandline": "{{pwsh}} -NoProfile -ExecutionPolicy Bypass -Command \"tsg processes -i\"",
                     "startingDirectory": "%USERPROFILE%"
                 }
             ],
@@ -92,7 +117,10 @@ public class WindowsHost : IPlatformHost
                 {"keys":"ctrl+alt+s","command":{"action":"sendInput","input":"tsg status\r\n"},"name":"TSG: Status"},
                 {"keys":"ctrl+alt+f","command":{"action":"sendInput","input":"tsg recover\r\n"},"name":"TSG: Recover"},
                 {"keys":"ctrl+alt+r","command":{"action":"sendInput","input":"tsg restore\r\n"},"name":"TSG: Restore"},
-                {"keys":"ctrl+alt+g","command":{"action":"sendInput","input":"tsg focus\r\n"},"name":"TSG: Focus"}
+                {"keys":"ctrl+alt+g","command":{"action":"sendInput","input":"tsg focus\r\n"},"name":"TSG: Focus"},
+                {"keys":"ctrl+alt+w","command":{"action":"sendInput","input":"tsg windows\r\n"},"name":"TSG: Windows"},
+                {"keys":"ctrl+alt+n","command":{"action":"sendInput","input":"tsg snapshots\r\n"},"name":"TSG: Snapshots"},
+                {"keys":"ctrl+alt+p","command":{"action":"sendInput","input":"tsg processes\r\n"},"name":"TSG: Processes"}
             ]
         }
         """;
