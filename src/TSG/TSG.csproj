@@ -24,7 +24,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tsg</ToolCommandName>
     <PackageId>TerminalStateGuard</PackageId>
-    <Version>2.0.2</Version>
+    <Version>2.0.3</Version>
     <Authors>sbay-dev</Authors>
     <Company>sbay-dev</Company>
     <Description>TSG — Terminal State Guard: Complete terminal intelligence platform with real-time window tracking (COM IUIAutomation), interactive process manager, SQLite state database, session recovery, and Copilot performance optimization.</Description>

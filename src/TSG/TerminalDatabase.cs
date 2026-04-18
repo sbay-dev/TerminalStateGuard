@@ -462,7 +462,12 @@ public sealed class TerminalDatabase : IDisposable
                 sessionByTitle.TryAdd(summary, (sessionId, summary, path));
         }
 
-        if (sessionByOrdinal.Count == 0) return;
+        if (sessionByOrdinal.Count == 0)
+        {
+            // No history for this window — fall back to scanning all copilot sessions on disk
+            EnrichFromCopilotSessionStore(tabs);
+            return;
+        }
 
         // Enrich tabs that are missing session IDs
         for (var i = 0; i < tabs.Count; i++)
@@ -504,6 +509,88 @@ public sealed class TerminalDatabase : IDisposable
                         }
                         break;
                     }
+                }
+            }
+        }
+
+        // Final fallback: scan disk for any unmatched tabs
+        EnrichFromCopilotSessionStore(tabs);
+    }
+
+    /// <summary>
+    /// Last-resort enrichment: scan all copilot session-state directories on disk
+    /// and match tab titles to session summaries. Useful for OLD windows captured
+    /// before session ID tracking was reliable.
+    /// </summary>
+    static void EnrichFromCopilotSessionStore(List<CaptureTab> tabs)
+    {
+        var sessionsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".copilot", "session-state");
+        if (!Directory.Exists(sessionsDir)) return;
+
+        // Check if any tabs need enrichment
+        if (!tabs.Any(t => t.CopilotSessionId == null && !string.IsNullOrEmpty(t.Title))) return;
+
+        // Build summary → (sessionId, cwd, updated) lookup from disk
+        var diskSessions = new List<(string SessionId, string Summary, string Cwd, DateTime Updated)>();
+        foreach (var dir in Directory.EnumerateDirectories(sessionsDir))
+        {
+            var ws = Path.Combine(dir, "workspace.yaml");
+            if (!File.Exists(ws)) continue;
+            try
+            {
+                string? id = Path.GetFileName(dir);
+                string? summary = null;
+                string? cwd = null;
+                DateTime updated = File.GetLastWriteTime(ws);
+                foreach (var line in File.ReadLines(ws))
+                {
+                    var t = line.TrimStart();
+                    if (t.StartsWith("summary: ", StringComparison.Ordinal))
+                        summary = t["summary: ".Length..].Trim();
+                    else if (t.StartsWith("cwd: ", StringComparison.Ordinal))
+                        cwd = t["cwd: ".Length..].Trim();
+                }
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(summary) && summary.Length >= 4)
+                    diskSessions.Add((id, summary, cwd ?? "", updated));
+            }
+            catch (IOException) { }
+        }
+
+        if (diskSessions.Count == 0) return;
+
+        // Sort by most recent for tie-breaking
+        diskSessions = [.. diskSessions.OrderByDescending(s => s.Updated)];
+
+        foreach (var tab in tabs)
+        {
+            if (tab.CopilotSessionId != null) continue;
+            if (string.IsNullOrEmpty(tab.Title)) continue;
+
+            var cleanTitle = tab.Title.Replace("🤖", "", StringComparison.Ordinal).Trim();
+            if (cleanTitle.Length < 4) continue;
+
+            // Try exact summary match first, then bidirectional contains
+            var match = diskSessions.FirstOrDefault(s =>
+                s.Summary.Equals(cleanTitle, StringComparison.OrdinalIgnoreCase));
+            if (match.SessionId == null)
+            {
+                match = diskSessions.FirstOrDefault(s =>
+                    cleanTitle.Contains(s.Summary, StringComparison.OrdinalIgnoreCase)
+                    || s.Summary.Contains(cleanTitle, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (match.SessionId != null)
+            {
+                tab.HasCopilot = true;
+                tab.CopilotSessionId = match.SessionId;
+                tab.CopilotSummary = match.Summary;
+                if (string.IsNullOrEmpty(tab.Path) && !string.IsNullOrEmpty(match.Cwd))
+                {
+                    tab.Path = match.Cwd;
+                    tab.Folder = Path.GetFileName(match.Cwd);
+                    tab.DirExists = Directory.Exists(match.Cwd);
                 }
             }
         }
