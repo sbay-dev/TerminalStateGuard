@@ -9,7 +9,7 @@ namespace TSG;
 /// and launches <c>wt new-tab -d &lt;cwd&gt; pwsh -NoExit -Command "copilot --resume=&lt;id&gt;"</c>.
 /// Also handles the <c>tsg://resume/&lt;id&gt;</c> URL scheme registered during install.
 /// </summary>
-public static class Resume
+public static class SessionResume
 {
     public static Task<int> RunAsync(IPlatformHost host, string[] args)
     {

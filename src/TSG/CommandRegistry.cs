@@ -30,7 +30,7 @@ public static class CommandRegistry
             ["db"]        = args => DbQuery.RunAsync(host, args),
             ["doctor"]    = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
             ["config"]    = args => Configuration.RunAsync(host, args),
-            ["resume"]    = args => Resume.RunAsync(host, args),
+            ["resume"]    = args => SessionResume.RunAsync(host, args),
             ["version"]   = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
             ["help"]      = _ => { PrintHelp(); return Task.FromResult(0); },
             ["--help"]    = _ => { PrintHelp(); return Task.FromResult(0); },

@@ -21,14 +21,15 @@ public static class Hyperlink
             || string.Equals(Environment.GetEnvironmentVariable("TERM_PROGRAM"), "vscode", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Wrap <paramref name="text"/> in an OSC 8 hyperlink pointing at <paramref name="url"/>.</summary>
-    public static string Wrap(string url, string text)
+    public static string Wrap(Uri url, string text)
     {
-        if (!IsSupported || string.IsNullOrEmpty(url)) return text;
-        return $"{Osc8}{url}{St}{text}{Osc8}{St}";
+        ArgumentNullException.ThrowIfNull(url);
+        if (!IsSupported) return text;
+        return $"{Osc8}{url.AbsoluteUri}{St}{text}{Osc8}{St}";
     }
 
     /// <summary>Build a <c>tsg://resume/{sessionId}</c> URL to reopen a copilot session in a new tab.</summary>
-    public static string ResumeUrl(string sessionId) => $"tsg://resume/{sessionId}";
+    public static Uri ResumeUrl(string sessionId) => new($"tsg://resume/{sessionId}", UriKind.Absolute);
 
     /// <summary>Write a clickable session ID (short prefix) to the console.</summary>
     public static void WriteSessionId(string sessionId, ConsoleColor color = ConsoleColor.DarkYellow)
