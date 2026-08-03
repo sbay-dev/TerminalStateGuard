@@ -15,7 +15,7 @@ $script:CallerShell = if ($env:TSG_CALLER_SHELL -and (Test-Path $env:TSG_CALLER_
 } else {
     (Get-Process -Id $PID).Path
 }
-$script:ClickActions = @{}
+$script:PickerEntries = [Collections.Generic.List[object]]::new()
 
 function Write-SessionLink {
     param(
@@ -24,10 +24,6 @@ function Write-SessionLink {
     )
 
     if ($env:WT_SESSION -and -not [Console]::IsOutputRedirected) {
-        $script:ClickActions[[Console]::CursorTop] = @{
-            SessionId = $SessionId
-            Path = $Path
-        }
         Write-Host "🖱️ $SessionId click" -ForegroundColor DarkYellow -NoNewline
         return
     }
@@ -49,12 +45,19 @@ function Open-RecoveryTab {
 
     $arguments = @("-w", "0", "new-tab", "-d", $startDir, $script:CallerShell)
     if ($SessionId) {
+        $sessionGuid = [guid]::Empty
+        if (-not [guid]::TryParse($SessionId, [ref]$sessionGuid)) {
+            Write-Warning "Invalid Copilot session ID: $SessionId"
+            return
+        }
+
+        $normalizedId = $sessionGuid.ToString("D")
         $shellName = [IO.Path]::GetFileNameWithoutExtension($script:CallerShell).ToLowerInvariant()
         if ($shellName -eq "cmd") {
-            $arguments += @("/K", "copilot --resume=$SessionId")
+            $arguments += @("/K", "tsg resume-host $normalizedId")
         }
         else {
-            $arguments += @("-NoExit", "-Command", "copilot --resume=$SessionId")
+            $arguments += @("-NoExit", "-Command", "tsg resume-host $normalizedId")
         }
     }
 
@@ -62,31 +65,102 @@ function Open-RecoveryTab {
 }
 
 function Read-RecoveryChoice {
-    Write-Host "`n  Numbers (comma-sep), A=all tabs, W=restore windows, Q=quit; or click a session ID:" -ForegroundColor Yellow
-    Write-Host "  Choice: " -ForegroundColor Yellow -NoNewline
-
     if (-not $env:WT_SESSION -or [Console]::IsInputRedirected) {
-        return Read-Host
+        Write-Host "`n  Numbers (comma-sep), A=all tabs, W=restore windows, Q=quit:" -ForegroundColor Yellow
+        return Read-Host "  Choice"
     }
 
     $esc = [char]27
-    [Console]::Write("$esc[?1000h$esc[?1006h")
     $typed = [Text.StringBuilder]::new()
+    $script:PickerOffset = 0
+
+    function Show-Picker {
+        $pageSize = [Math]::Max(1, [Console]::WindowHeight - 5)
+        $maxOffset = [Math]::Max(0, $script:PickerEntries.Count - $pageSize)
+        $script:PickerOffset = [Math]::Min($maxOffset, [Math]::Max(0, $script:PickerOffset))
+        $width = [Math]::Max(1, [Console]::WindowWidth - 2)
+
+        function Write-PickerLine {
+            param(
+                [string]$Text,
+                [ConsoleColor]$Color
+            )
+
+            $visibleText = if ($Text.Length -gt $width) { $Text.Substring(0, $width) } else { $Text }
+            Write-Host $visibleText -ForegroundColor $Color
+        }
+
+        [Console]::Write("$esc[2J$esc[H")
+        Write-PickerLine "  TSG Recover - click a session ID or use the mouse wheel" Cyan
+        $lastVisible = [Math]::Min($script:PickerEntries.Count, $script:PickerOffset + $pageSize)
+        Write-PickerLine "  Entries $($script:PickerOffset + 1)-$lastVisible of $($script:PickerEntries.Count)" DarkGray
+
+        $visibleCount = [Math]::Min($pageSize, $script:PickerEntries.Count - $script:PickerOffset)
+        for ($i = 0; $i -lt $visibleCount; $i++) {
+            $entry = $script:PickerEntries[$script:PickerOffset + $i]
+            $color = if ($entry.SessionId) { [ConsoleColor]::DarkYellow } else { [ConsoleColor]::White }
+            Write-PickerLine $entry.Label $color
+        }
+
+        for ($i = $visibleCount; $i -lt $pageSize; $i++) {
+            Write-Host ""
+        }
+
+        Write-PickerLine "  Type item numbers, A=all tabs, W=restore windows, Q=quit" Yellow
+        $choiceLine = "  Choice: $($typed.ToString())"
+        if ($choiceLine.Length -gt $width) { $choiceLine = $choiceLine.Substring($choiceLine.Length - $width) }
+        Write-Host $choiceLine -ForegroundColor Yellow -NoNewline
+
+        return @{
+            PageSize = $pageSize
+            VisibleCount = $visibleCount
+            FirstMouseRow = 3
+            MaxOffset = $maxOffset
+        }
+    }
+
+    [Console]::Write("$esc[?1049h$esc[?1000h$esc[?1006h")
+    $picker = Show-Picker
 
     try {
         while ($true) {
             $key = [Console]::ReadKey($true)
 
             if ($key.Key -eq [ConsoleKey]::Enter) {
-                Write-Host ""
                 return $typed.ToString()
             }
 
             if ($key.Key -eq [ConsoleKey]::Backspace) {
                 if ($typed.Length -gt 0) {
                     $typed.Length--
-                    [Console]::Write("`b `b")
+                    $picker = Show-Picker
                 }
+                continue
+            }
+
+            if ($key.Key -eq [ConsoleKey]::Home) {
+                $script:PickerOffset = 0
+                $picker = Show-Picker
+                continue
+            }
+
+            if ($key.Key -eq [ConsoleKey]::End) {
+                $script:PickerOffset = $picker.MaxOffset
+                $picker = Show-Picker
+                continue
+            }
+
+            if ($key.Key -eq [ConsoleKey]::PageUp -or $key.Key -eq [ConsoleKey]::UpArrow) {
+                $step = if ($key.Key -eq [ConsoleKey]::PageUp) { $picker.PageSize } else { 1 }
+                $script:PickerOffset -= $step
+                $picker = Show-Picker
+                continue
+            }
+
+            if ($key.Key -eq [ConsoleKey]::PageDown -or $key.Key -eq [ConsoleKey]::DownArrow) {
+                $step = if ($key.Key -eq [ConsoleKey]::PageDown) { $picker.PageSize } else { 1 }
+                $script:PickerOffset += $step
+                $picker = Show-Picker
                 continue
             }
 
@@ -103,15 +177,34 @@ function Read-RecoveryChoice {
                     if ($part -eq 'M' -or $part -eq 'm') { break }
                 }
 
-                if ($sequence.ToString() -match '^\[<0;(\d+);(\d+)[Mm]$') {
-                    $bufferRow = [Console]::WindowTop + [int]$Matches[2] - 1
-                    if ($script:ClickActions.ContainsKey($bufferRow)) {
-                        Write-Host ""
-                        return ,$script:ClickActions[$bufferRow]
+                if ($sequence.ToString() -match '^\[<(\d+);(\d+);(\d+)([Mm])$') {
+                    $button = [int]$Matches[1]
+                    $mouseRow = [int]$Matches[3]
+                    $eventType = $Matches[4]
+
+                    if ($button -eq 64 -or $button -eq 65) {
+                        $direction = if ($button -eq 64) { -1 } else { 1 }
+                        $wheelStep = [Math]::Max(1, [int]($picker.PageSize / 5))
+                        $script:PickerOffset += $direction * $wheelStep
+                        $picker = Show-Picker
+                        continue
+                    }
+
+                    if ($button -eq 0 -and $eventType -eq 'M') {
+                        $visibleIndex = $mouseRow - $picker.FirstMouseRow
+                        if ($visibleIndex -ge 0 -and $visibleIndex -lt $picker.VisibleCount) {
+                            $entry = $script:PickerEntries[$script:PickerOffset + $visibleIndex]
+                            if ($entry.SessionId) {
+                                return [pscustomobject]@{
+                                    Kind = "SessionClick"
+                                    SessionId = $entry.SessionId
+                                    Path = $entry.Path
+                                }
+                            }
+                        }
                     }
                 }
                 elseif ($sequence.Length -eq 0) {
-                    Write-Host ""
                     return "Q"
                 }
                 continue
@@ -119,12 +212,12 @@ function Read-RecoveryChoice {
 
             if (-not [char]::IsControl($key.KeyChar)) {
                 [void]$typed.Append($key.KeyChar)
-                [Console]::Write($key.KeyChar)
+                $picker = Show-Picker
             }
         }
     }
     finally {
-        [Console]::Write("$esc[?1000l$esc[?1006l")
+        [Console]::Write("$esc[?1000l$esc[?1006l$esc[?1049l")
     }
 }
 
@@ -194,6 +287,11 @@ if ($closedWindows.Count -gt 0) {
         $tabCount = if ($win.Tabs) { $win.Tabs.Count } else { 0 }
         $copCount = if ($win.CopilotCount) { $win.CopilotCount } else { 0 }
         $wid = if ($win.Id.Length -gt 8) { $win.Id.Substring(0, 8) } else { $win.Id }
+        $script:PickerEntries.Add([pscustomobject]@{
+            Label = "  [$n] Window [$wid] - $tabCount tabs, $copCount Copilot"
+            SessionId = $null
+            Path = $null
+        })
         Write-Host "  [$n] 🪟 Window [$wid]  📑 $tabCount tabs  🤖 $copCount" -ForegroundColor White
         Write-Host "      📅 $($win.OpenedAt) → ❌ $($win.ClosedAt)" -ForegroundColor DarkGray
         if ($win.Tabs) {
@@ -205,6 +303,11 @@ if ($closedWindows.Count -gt 0) {
                 Write-Host "      $icon $folder$label" -ForegroundColor DarkGray -NoNewline
                 if ($t.Summary) { Write-Host "  💬 $($t.Summary)" -ForegroundColor DarkCyan -NoNewline }
                 if ($t.CopilotId) {
+                    $script:PickerEntries.Add([pscustomobject]@{
+                        Label = "      $($t.CopilotId)  $folder"
+                        SessionId = $t.CopilotId
+                        Path = $t.Path
+                    })
                     Write-Host "  " -NoNewline
                     Write-SessionLink -SessionId $t.CopilotId -Path $t.Path
                 }
@@ -221,6 +324,13 @@ if ($sess.Tabs.Count -gt 0) {
     foreach ($tab in $sess.Tabs) {
         $items += @{ Type = "tab"; Data = $tab }
         $n = $items.Count; $ic = if ($tab.HasCopilot) { "🤖" } else { "📂" }
+        $tabLabel = "  [$n] $($tab.Folder) (Win $($tab.Window))"
+        if ($tab.CopilotId) { $tabLabel += "  $($tab.CopilotId)" }
+        $script:PickerEntries.Add([pscustomobject]@{
+            Label = $tabLabel
+            SessionId = $tab.CopilotId
+            Path = $tab.Path
+        })
         Write-Host "  [$n] $ic $($tab.Folder) (Win $($tab.Window))" -ForegroundColor White
         if ($tab.Summary) { Write-Host "      💬 $($tab.Summary)" -ForegroundColor DarkCyan }
         if ($tab.CopilotId) {
@@ -237,6 +347,11 @@ if ($sess.AllSessions.Count -gt 0) {
     foreach ($cs in $sess.AllSessions) {
         $items += @{ Type = "session"; Data = $cs }
         $n = $items.Count; $folder = Split-Path $cs.Cwd -Leaf
+        $script:PickerEntries.Add([pscustomobject]@{
+            Label = "  [$n] $($cs.SessionId)  $folder"
+            SessionId = $cs.SessionId
+            Path = $cs.Cwd
+        })
         Write-Host "  [$n] 🤖 $folder" -ForegroundColor White
         if ($cs.Summary) { Write-Host "      💬 $($cs.Summary)" -ForegroundColor DarkCyan }
         Write-Host "      🔑 " -ForegroundColor DarkGray -NoNewline
@@ -247,7 +362,7 @@ if ($sess.AllSessions.Count -gt 0) {
 
 if ($items.Count -eq 0) { Write-Host "  No sessions found" -ForegroundColor Yellow; return }
 $inp = Read-RecoveryChoice
-if ($inp -is [hashtable]) {
+if ($inp -and $inp.Kind -eq "SessionClick") {
     Open-RecoveryTab -Path $inp.Path -SessionId $inp.SessionId
     Write-Host "  🚀 Opened clicked session in the current Terminal window" -ForegroundColor Green
     return

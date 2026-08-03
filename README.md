@@ -170,6 +170,16 @@ directory, reuses the calling shell application (`pwsh`, Windows PowerShell, or
 copilot --resume=<sessionId>
 ```
 
+If Copilot specifically reports that no session, task, or name matches that
+ID, TSG automatically retries with:
+
+```powershell
+copilot --session-id=<sessionId>
+```
+
+This starts a new session with the same valid UUID instead of leaving the
+restored tab at an error prompt.
+
 To work across Windows Terminal versions that reject custom OSC 8 schemes, TSG
 creates a small local launcher under `~/.tsg/session-links/` and links to it
 with the supported `file://` scheme. The launcher invokes the installed
@@ -200,7 +210,8 @@ does not open a `file://` or web link, so Windows Terminal does not show an
 unsafe-location warning. This applies to sessions inside tracked windows,
 currently open tabs, and the stored Copilot-session list. The new tab targets
 the currently active Windows Terminal window and preserves the shell that
-invoked TSG.
+invoked TSG. Mouse-wheel scrolling remains available while click tracking is
+active, including navigation between the first and last entries of long lists.
 
 ### Optional Large Lists
 

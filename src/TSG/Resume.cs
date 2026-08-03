@@ -65,6 +65,32 @@ public static class SessionResume
         }
     }
 
+    public static async Task<int> RunHostAsync(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (args.Length != 1 || !Guid.TryParse(args[0], out var sessionGuid))
+        {
+            await Console.Error.WriteLineAsync("  Invalid Copilot session ID.");
+            return 1;
+        }
+
+        var sessionId = sessionGuid.ToString("D");
+        var (exitCode, errorText) = await RunCopilotAsync($"--resume={sessionId}", captureError: true);
+        if (exitCode == 0
+            || !errorText.Contains(
+                "No session, task, or name matched",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return exitCode;
+        }
+
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("  Resume target was not found. Starting a new session with the same ID...");
+        Console.ResetColor();
+        return (await RunCopilotAsync($"--session-id={sessionId}", captureError: false)).ExitCode;
+    }
+
     /// <summary>Extract the session ID from either a bare GUID or a <c>tsg://resume/&lt;id&gt;</c> URL.</summary>
     static string? ExtractSessionId(string input)
     {
@@ -102,6 +128,57 @@ public static class SessionResume
         }
         catch (IOException) { }
         return null;
+    }
+
+    static async Task<(int ExitCode, string ErrorText)> RunCopilotAsync(
+        string argument,
+        bool captureError)
+    {
+        var psi = CreateCopilotStartInfo(argument);
+        psi.RedirectStandardError = captureError;
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start GitHub Copilot CLI.");
+
+        var captured = new System.Text.StringBuilder();
+        if (captureError)
+        {
+            var buffer = new char[1024];
+            while (true)
+            {
+                var count = await process.StandardError.ReadAsync(buffer);
+                if (count == 0)
+                    break;
+
+                await Console.Error.WriteAsync(buffer.AsMemory(0, count));
+                if (captured.Length < 16_384)
+                {
+                    var remaining = 16_384 - captured.Length;
+                    captured.Append(buffer, 0, Math.Min(count, remaining));
+                }
+            }
+        }
+
+        await process.WaitForExitAsync();
+        return (process.ExitCode, captured.ToString());
+    }
+
+    static ProcessStartInfo CreateCopilotStartInfo(string argument)
+    {
+        var psi = OperatingSystem.IsWindows()
+            ? new ProcessStartInfo("cmd.exe")
+            : new ProcessStartInfo("copilot");
+        psi.UseShellExecute = false;
+
+        if (OperatingSystem.IsWindows())
+        {
+            psi.ArgumentList.Add("/d");
+            psi.ArgumentList.Add("/c");
+            psi.ArgumentList.Add("copilot");
+        }
+
+        psi.ArgumentList.Add(argument);
+        return psi;
     }
 
 }

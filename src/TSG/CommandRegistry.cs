@@ -31,6 +31,7 @@ public static class CommandRegistry
             ["doctor"] = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
             ["config"] = args => Configuration.RunAsync(host, args),
             ["resume"] = args => SessionResume.RunAsync(host, args),
+            ["resume-host"] = SessionResume.RunHostAsync,
             ["version"] = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
             ["help"] = _ => { PrintHelp(); return Task.FromResult(0); },
             ["--help"] = _ => { PrintHelp(); return Task.FromResult(0); },

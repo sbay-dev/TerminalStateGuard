@@ -2,6 +2,16 @@
 
 All notable TerminalStateGuard changes are documented here.
 
+## [2.1.7] - 2026-08-04
+
+### Fixed
+
+- Fall back from `copilot --resume=<id>` to `copilot --session-id=<id>` only
+  when Copilot reports that no session, task, or name matches, without treating
+  an interrupted valid session as a missing one
+- Handle mouse-wheel events while TSG Recover mouse tracking is enabled
+- Fix clicked-row result handling so mouse clicks reliably open the selected session
+
 ## [2.1.6] - 2026-08-04
 
 ### Fixed

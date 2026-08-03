@@ -65,13 +65,13 @@ public sealed record ShellContext(string Executable, ShellKind Kind)
             ShellKind.CommandPrompt =>
             [
                 "/K",
-                $"copilot --resume={sessionId}"
+                $"tsg resume-host {sessionId}"
             ],
             ShellKind.PowerShellCore or ShellKind.WindowsPowerShell =>
             [
                 "-NoExit",
                 "-Command",
-                $"copilot --resume={sessionId}"
+                $"tsg resume-host {sessionId}"
             ],
             _ => []
         };
