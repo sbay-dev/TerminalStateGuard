@@ -24,7 +24,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>tsg</ToolCommandName>
     <PackageId>TerminalStateGuard</PackageId>
-    <Version>2.1.0</Version>
+    <Version>2.1.1</Version>
     <Authors>sbay-dev</Authors>
     <Company>sbay-dev</Company>
     <Description>TSG — Terminal State Guard: Complete terminal intelligence platform with real-time window tracking (COM IUIAutomation), interactive process manager, SQLite state database, session recovery, and Copilot performance optimization.</Description>
@@ -43,5 +43,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.6" />
+    <!--
+      Pin patched SQLitePCLRaw.lib.e_sqlite3 to close GHSA-2m69-gcr7-jv3q which
+      the transitive 2.1.11 shipped by Microsoft.Data.Sqlite 10.0.6 is affected by.
+    -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 </Project>
