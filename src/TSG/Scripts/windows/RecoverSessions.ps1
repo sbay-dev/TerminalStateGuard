@@ -11,6 +11,49 @@ $configuredLimit = if ($env:TSG_MAX_SNAPSHOTS) { [int]$env:TSG_MAX_SNAPSHOTS } e
 }
 $script:MaxSessions = if ($All) { 5000 } elseif ($Limit -gt 0) { $Limit } else { $configuredLimit }
 
+function Get-SessionLauncherUri {
+    param([string]$SessionId)
+
+    $sessionGuid = [guid]::Empty
+    if (-not [guid]::TryParse($SessionId, [ref]$sessionGuid)) { return $null }
+
+    $tsgCommand = Get-Command tsg -ErrorAction SilentlyContinue
+    if (-not $tsgCommand -or -not (Test-Path $tsgCommand.Source)) { return $null }
+
+    $linksDir = Join-Path $env:USERPROFILE ".tsg\session-links"
+    New-Item -ItemType Directory -Path $linksDir -Force | Out-Null
+
+    $normalizedId = $sessionGuid.ToString("D")
+    $launcherPath = Join-Path $linksDir "resume-$normalizedId.cmd"
+    $launcher = "@echo off`r`n`"$($tsgCommand.Source)`" resume `"$normalizedId`"`r`nexit /b %errorlevel%`r`n"
+
+    try {
+        if (-not (Test-Path $launcherPath) -or (Get-Content $launcherPath -Raw) -ne $launcher) {
+            Set-Content -Path $launcherPath -Value $launcher -Encoding Ascii -NoNewline
+        }
+        return ([Uri]$launcherPath).AbsoluteUri
+    }
+    catch {
+        return $null
+    }
+}
+
+function Write-SessionLink {
+    param([string]$SessionId)
+
+    $launcherUri = Get-SessionLauncherUri -SessionId $SessionId
+    if ($env:WT_SESSION -and $launcherUri -and -not [Console]::IsOutputRedirected) {
+        $esc = [char]27
+        $st = "$esc\"
+        Write-Host "🔗 " -ForegroundColor DarkYellow -NoNewline
+        Write-Host "$esc]8;;$launcherUri$st$SessionId$esc]8;;$st" -ForegroundColor DarkYellow -NoNewline
+        Write-Host " Ctrl+click" -ForegroundColor DarkGray -NoNewline
+    }
+    else {
+        Write-Host $SessionId -ForegroundColor DarkGray -NoNewline
+    }
+}
+
 function Get-CopilotSessionMap {
     $all = @(); $sr = Join-Path $env:USERPROFILE ".copilot\session-state"
     if (-not (Test-Path $sr)) { return $all }
@@ -87,6 +130,10 @@ if ($closedWindows.Count -gt 0) {
                 $label = if ($t.Title -and $t.Title -ne "PowerShell7" -and $t.Title -ne "Default") { " [$($t.Title)]" } elseif ($tabType -eq "cmd") { " [CMD]" } else { "" }
                 Write-Host "      $icon $folder$label" -ForegroundColor DarkGray -NoNewline
                 if ($t.Summary) { Write-Host "  💬 $($t.Summary)" -ForegroundColor DarkCyan -NoNewline }
+                if ($t.CopilotId) {
+                    Write-Host "  " -NoNewline
+                    Write-SessionLink -SessionId $t.CopilotId
+                }
                 Write-Host ""
             }
         }
@@ -102,7 +149,11 @@ if ($sess.Tabs.Count -gt 0) {
         $n = $items.Count; $ic = if ($tab.HasCopilot) { "🤖" } else { "📂" }
         Write-Host "  [$n] $ic $($tab.Folder) (Win $($tab.Window))" -ForegroundColor White
         if ($tab.Summary) { Write-Host "      💬 $($tab.Summary)" -ForegroundColor DarkCyan }
-        if ($tab.CopilotId) { Write-Host "      🔑 $($tab.CopilotId)" -ForegroundColor DarkGray }
+        if ($tab.CopilotId) {
+            Write-Host "      🔑 " -ForegroundColor DarkGray -NoNewline
+            Write-SessionLink -SessionId $tab.CopilotId
+            Write-Host ""
+        }
     }
 }
 
@@ -114,7 +165,9 @@ if ($sess.AllSessions.Count -gt 0) {
         $n = $items.Count; $folder = Split-Path $cs.Cwd -Leaf
         Write-Host "  [$n] 🤖 $folder" -ForegroundColor White
         if ($cs.Summary) { Write-Host "      💬 $($cs.Summary)" -ForegroundColor DarkCyan }
-        Write-Host "      🔑 $($cs.SessionId)  📅 $($cs.Updated)" -ForegroundColor DarkGray
+        Write-Host "      🔑 " -ForegroundColor DarkGray -NoNewline
+        Write-SessionLink -SessionId $cs.SessionId
+        Write-Host "  📅 $($cs.Updated)" -ForegroundColor DarkGray
     }
 }
 

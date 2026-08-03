@@ -2,6 +2,13 @@
 
 All notable TerminalStateGuard changes are documented here.
 
+## [2.1.5] - 2026-08-04
+
+### Added
+
+- Clickable session IDs throughout `tsg recover`
+- Local `file://` launchers for tracked-window tabs, open tabs, and stored sessions
+
 ## [2.1.4] - 2026-08-04
 
 ### Fixed

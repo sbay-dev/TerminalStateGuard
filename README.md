@@ -193,6 +193,10 @@ tsg recover --limit 1000
 tsg recover --all
 ```
 
+Session IDs displayed by `tsg recover` use the same `🔗 … Ctrl+click`
+launcher as `tsg windows`. This applies to sessions inside tracked windows,
+currently open tabs, and the stored Copilot-session list.
+
 ### Optional Large Lists
 
 The default view stays compact. Increase it only when needed:
