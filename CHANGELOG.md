@@ -2,6 +2,15 @@
 
 All notable TerminalStateGuard changes are documented here.
 
+## [2.1.4] - 2026-08-04
+
+### Fixed
+
+- Replace custom `tsg://` OSC 8 targets with supported local `file://` launchers
+  so Ctrl+click works on Windows Terminal versions that reject custom schemes
+- Validate launcher session IDs as GUIDs and store launchers under
+  `~/.tsg/session-links/`
+
 ## [2.1.3] - 2026-08-04
 
 ### Documentation and release integrity

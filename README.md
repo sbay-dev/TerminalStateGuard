@@ -169,8 +169,13 @@ directory, and runs:
 copilot --resume=<sessionId>
 ```
 
-The link uses the per-user `tsg://resume/<sessionId>` protocol registered by
-`tsg install`. The equivalent command works without mouse support:
+To work across Windows Terminal versions that reject custom OSC 8 schemes, TSG
+creates a small local launcher under `~/.tsg/session-links/` and links to it
+with the supported `file://` scheme. The launcher invokes the installed
+`tsg resume <sessionId>` command. The per-user `tsg://resume/<sessionId>`
+protocol remains available as a direct fallback.
+
+The equivalent command works without mouse support:
 
 ```powershell
 tsg resume cf530ca2-7e16-467e-8004-3ff26f0c5319

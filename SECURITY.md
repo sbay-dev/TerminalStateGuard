@@ -72,8 +72,11 @@ Direct Package References: ✅ 2 (SQLite provider + patched native SQLite pin)
 ### 🔗 Clickable Session-Link Safety
 
 - Session links use `tsg://resume/<GUID>` and are registered only under the current user
+- OSC 8 links target generated local launchers in `~/.tsg/session-links/` because
+  some Windows Terminal versions reject custom URI schemes
 - The handler invokes the installed `tsg` executable; it does not invoke a browser or remote endpoint
 - Session IDs are validated and the working directory is read from the local `workspace.yaml`
+- Launcher filenames and arguments are derived only from validated GUIDs
 - `tsg uninstall` removes the `HKCU\Software\Classes\tsg` protocol registration
 
 ## Reporting a Vulnerability
