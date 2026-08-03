@@ -28,6 +28,13 @@ public class Installer(IPlatformHost host)
         // 3. Terminal integration (Fragment on Windows, aliases on Linux)
         await host.InstallTerminalIntegrationAsync();
 
+        // 4. URL protocol handler for tsg://resume/<id> clickable session links
+        if (OperatingSystem.IsWindows())
+        {
+            if (RegisterTsgUrlProtocol())
+                Console.WriteLine("  ✅ URL protocol tsg:// registered (clickable session IDs)");
+        }
+
         // 4. Summary
         Console.WriteLine("""
 
@@ -72,9 +79,51 @@ public class Installer(IPlatformHost host)
 
         await host.RemoveTerminalIntegrationAsync();
 
+        if (OperatingSystem.IsWindows())
+            UnregisterTsgUrlProtocol();
+
         Console.WriteLine($"  ℹ️  Scripts kept at: {host.TsgDir}");
         Console.WriteLine("  ℹ️  To fully remove: rm -r ~/.tsg");
         Console.WriteLine("\n  ✅ Uninstalled\n");
+    }
+
+    /// <summary>
+    /// Register <c>tsg://</c> URL protocol under HKCU so clicking a
+    /// <c>tsg://resume/&lt;id&gt;</c> hyperlink in Windows Terminal invokes
+    /// <c>tsg resume &lt;id&gt;</c> — no admin rights required.
+    /// </summary>
+    static bool RegisterTsgUrlProtocol()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try
+        {
+            var tsgPath = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(tsgPath) || !File.Exists(tsgPath)) return false;
+
+            using var root = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\tsg");
+            if (root == null) return false;
+            root.SetValue("", "URL:TerminalStateGuard");
+            root.SetValue("URL Protocol", "");
+
+            using var shell = root.CreateSubKey(@"shell\open\command");
+            if (shell == null) return false;
+            shell.SetValue("", $"\"{tsgPath}\" resume \"%1\"");
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    static void UnregisterTsgUrlProtocol()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\tsg", throwOnMissingSubKey: false);
+        }
+        catch (Exception) { /* Non-critical */ }
     }
 
     void ExtractScripts()

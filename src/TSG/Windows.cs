@@ -22,10 +22,12 @@ public static class Windows
             return await RestoreWindowsAsync(host, windowsDir, activePath);
 
         if (args.Length > 0 && args[0].Equals("--history", StringComparison.OrdinalIgnoreCase))
-            return ShowDbHistory(host);
+            return ShowDbHistory(host, ParseLimit(args, defaultLimit: 50));
 
         var interactive = args.Any(a => a.Equals("--interactive", StringComparison.OrdinalIgnoreCase)
                                      || a.Equals("-i", StringComparison.OrdinalIgnoreCase));
+
+        var closedLimit = ParseLimit(args, defaultLimit: 5);
 
         // Capture fresh state to SQLite
         var captureData = await StateCapture.CaptureStateAsync(host);
@@ -36,12 +38,35 @@ public static class Windows
         }
 
         if (interactive)
-            return await InteractiveLoop(host, windowsDir, activePath, captureData);
+            return await InteractiveLoop(host, windowsDir, activePath, captureData, closedLimit);
 
-        return ShowFromDb(host, captureData);
+        return ShowFromDb(host, captureData, closedLimit);
     }
 
-    static int ShowFromDb(IPlatformHost host, CaptureData? data)
+    /// <summary>
+    /// Parse <c>--limit N</c>, <c>-n N</c> or <c>--all</c> from args.
+    /// Returns 500 for --all (soft cap), a parsed integer, or <paramref name="defaultLimit"/>.
+    /// </summary>
+    static int ParseLimit(string[] args, int defaultLimit)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (args[i].Equals("--all", StringComparison.OrdinalIgnoreCase))
+                return 500;
+            if ((args[i].Equals("--limit", StringComparison.OrdinalIgnoreCase)
+                 || args[i].Equals("-n", StringComparison.OrdinalIgnoreCase))
+                && i + 1 < args.Length
+                && int.TryParse(args[i + 1], System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var n)
+                && n > 0)
+            {
+                return Math.Min(n, 5000);
+            }
+        }
+        return defaultLimit;
+    }
+
+    static int ShowFromDb(IPlatformHost host, CaptureData? data, int closedLimit = 5)
     {
         if (data == null || data.Windows.Count == 0)
         {
@@ -53,7 +78,7 @@ public static class Windows
         List<ClosedWindowRecord> closedFromDb;
         using (var db = new TerminalDatabase(host.TsgDir))
         {
-            closedFromDb = db.GetClosedWindowsWithTabs(5);
+            closedFromDb = db.GetClosedWindowsWithTabs(closedLimit);
         }
 
         var liveWins = data.Windows.Where(w => w.IsLive).ToList();
@@ -122,10 +147,12 @@ public static class Windows
 
         // Quick action hints
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("\n  💡 tsg windows --restore   Restore closed windows");
-        Console.WriteLine("  💡 tsg windows --history   Browse capture history");
-        Console.WriteLine("  💡 tsg capture             Take a snapshot now");
-        Console.WriteLine("  💡 tsg processes           View dev processes & ports");
+        Console.WriteLine("\n  💡 tsg windows --restore     Restore closed windows");
+        Console.WriteLine("  💡 tsg windows --history     Browse capture history");
+        Console.WriteLine("  💡 tsg windows -n 100        Show more closed windows (or --all)");
+        Console.WriteLine("  💡 tsg resume <sessionId>    Open a copilot session in a new tab");
+        Console.WriteLine("  💡 tsg capture               Take a snapshot now");
+        Console.WriteLine("  💡 tsg processes             View dev processes & ports");
         Console.ResetColor();
 
         Console.WriteLine();
@@ -133,13 +160,14 @@ public static class Windows
     }
 
     /// <summary>Interactive dashboard loop for TSG Windows terminal tab.</summary>
-    static async Task<int> InteractiveLoop(IPlatformHost host, string windowsDir, string activePath, CaptureData? initialData)
+    static async Task<int> InteractiveLoop(IPlatformHost host, string windowsDir, string activePath, CaptureData? initialData, int closedLimit)
     {
         var data = initialData;
+        var currentLimit = closedLimit;
         while (true)
         {
             Console.Clear();
-            ShowFromDb(host, data);
+            ShowFromDb(host, data, currentLimit);
 
             // Interactive menu
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -166,6 +194,10 @@ public static class Windows
             Console.Write("    [F] ");
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine("🔃 Refresh");
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write("    [+/-] ");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine($"📏 Change closed-window limit (current: {currentLimit})");
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.Write("    [Q] ");
             Console.ForegroundColor = ConsoleColor.White;
@@ -210,7 +242,7 @@ public static class Windows
 
                 case 'H':
                     Console.Clear();
-                    ShowDbHistory(host);
+                    ShowDbHistory(host, 50);
                     Console.ForegroundColor = ConsoleColor.DarkGray;
                     Console.Write("\n  Press any key to continue...");
                     Console.ResetColor();
@@ -237,6 +269,18 @@ public static class Windows
                         using var db = new TerminalDatabase(host.TsgDir);
                         db.SaveCapture(data);
                     }
+                    break;
+
+                case '+':
+                case '=':
+                    currentLimit = currentLimit < 100 ? currentLimit + 10
+                                : currentLimit < 500 ? currentLimit + 50
+                                : Math.Min(currentLimit + 100, 5000);
+                    break;
+
+                case '-':
+                case '_':
+                    currentLimit = Math.Max(5, currentLimit <= 100 ? currentLimit - 10 : currentLimit - 50);
                     break;
 
                 case 'Q':
@@ -317,11 +361,16 @@ public static class Windows
             Console.ForegroundColor = ConsoleColor.DarkCyan;
             Console.Write($"  💬 {tab.CopilotSummary}");
         }
+        if (!string.IsNullOrEmpty(tab.CopilotSessionId))
+        {
+            Console.Write("  ");
+            Hyperlink.WriteSessionId(tab.CopilotSessionId!);
+        }
         Console.ResetColor();
         Console.WriteLine();
     }
 
-    static int ShowDbHistory(IPlatformHost host)
+    static int ShowDbHistory(IPlatformHost host, int limit = 50)
     {
         var dbPath = Path.Combine(host.TsgDir, "terminal.db");
         if (!File.Exists(dbPath))
@@ -331,7 +380,7 @@ public static class Windows
         }
 
         using var db = new TerminalDatabase(host.TsgDir);
-        var captures = db.GetCaptureHistory(50);
+        var captures = db.GetCaptureHistory(limit);
 
         if (captures.Count == 0)
         {

@@ -30,6 +30,7 @@ public static class CommandRegistry
             ["db"]        = args => DbQuery.RunAsync(host, args),
             ["doctor"]    = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
             ["config"]    = args => Configuration.RunAsync(host, args),
+            ["resume"]    = args => Resume.RunAsync(host, args),
             ["version"]   = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
             ["help"]      = _ => { PrintHelp(); return Task.FromResult(0); },
             ["--help"]    = _ => { PrintHelp(); return Task.FromResult(0); },
@@ -67,8 +68,10 @@ public static class CommandRegistry
             tsg snapshots --all  Show all with tab details
             tsg windows       Show active & recently closed windows with tabs
             tsg windows -i    Interactive dashboard (restore, snapshot, processes)
+            tsg windows -n N  Show N closed windows (or --all for up to 500)
             tsg windows --history  Browse window history
             tsg windows --restore  Restore windows with all their tabs
+            tsg resume <id>   Open a copilot session in a new terminal tab
             tsg capture       Capture current terminal state to SQLite
             tsg capture -q    Capture quietly (for automation)
             tsg processes     Show dev processes with ports & resource usage
