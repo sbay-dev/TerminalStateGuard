@@ -2,6 +2,16 @@
 
 All notable TerminalStateGuard changes are documented here.
 
+## [2.1.6] - 2026-08-04
+
+### Fixed
+
+- Resume sessions in a new tab of the currently active Windows Terminal window
+- Preserve the calling shell application (`pwsh`, Windows PowerShell, or `cmd`)
+- Carry the original shell through `TSG Recover` click actions
+- Replace external `file://` links in `TSG Recover` with native in-terminal mouse input
+- Remove the Windows Terminal unsafe-location warning from recovery clicks
+
 ## [2.1.5] - 2026-08-04
 
 ### Added

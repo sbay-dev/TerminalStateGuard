@@ -57,6 +57,7 @@ public class ScriptRunner(IPlatformHost host)
         psi.UseShellExecute = false;
         psi.Environment["TSG_VERSION"] =
             Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown";
+        psi.Environment["TSG_CALLER_SHELL"] = ShellContext.Resolve().Executable;
 
         var process = Process.Start(psi)!;
         await process.WaitForExitAsync();

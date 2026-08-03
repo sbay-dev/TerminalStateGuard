@@ -10,47 +10,121 @@ $configuredLimit = if ($env:TSG_MAX_SNAPSHOTS) { [int]$env:TSG_MAX_SNAPSHOTS } e
     if (Test-Path $cfgPath) { try { (Get-Content $cfgPath -Raw | ConvertFrom-Json).MaxSnapshots } catch { 50 } } else { 50 }
 }
 $script:MaxSessions = if ($All) { 5000 } elseif ($Limit -gt 0) { $Limit } else { $configuredLimit }
-
-function Get-SessionLauncherUri {
-    param([string]$SessionId)
-
-    $sessionGuid = [guid]::Empty
-    if (-not [guid]::TryParse($SessionId, [ref]$sessionGuid)) { return $null }
-
-    $tsgCommand = Get-Command tsg -ErrorAction SilentlyContinue
-    if (-not $tsgCommand -or -not (Test-Path $tsgCommand.Source)) { return $null }
-
-    $linksDir = Join-Path $env:USERPROFILE ".tsg\session-links"
-    New-Item -ItemType Directory -Path $linksDir -Force | Out-Null
-
-    $normalizedId = $sessionGuid.ToString("D")
-    $launcherPath = Join-Path $linksDir "resume-$normalizedId.cmd"
-    $launcher = "@echo off`r`n`"$($tsgCommand.Source)`" resume `"$normalizedId`"`r`nexit /b %errorlevel%`r`n"
-
-    try {
-        if (-not (Test-Path $launcherPath) -or (Get-Content $launcherPath -Raw) -ne $launcher) {
-            Set-Content -Path $launcherPath -Value $launcher -Encoding Ascii -NoNewline
-        }
-        return ([Uri]$launcherPath).AbsoluteUri
-    }
-    catch {
-        return $null
-    }
+$script:CallerShell = if ($env:TSG_CALLER_SHELL -and (Test-Path $env:TSG_CALLER_SHELL)) {
+    $env:TSG_CALLER_SHELL
+} else {
+    (Get-Process -Id $PID).Path
 }
+$script:ClickActions = @{}
 
 function Write-SessionLink {
-    param([string]$SessionId)
+    param(
+        [string]$SessionId,
+        [string]$Path
+    )
 
-    $launcherUri = Get-SessionLauncherUri -SessionId $SessionId
-    if ($env:WT_SESSION -and $launcherUri -and -not [Console]::IsOutputRedirected) {
-        $esc = [char]27
-        $st = "$esc\"
-        Write-Host "🔗 " -ForegroundColor DarkYellow -NoNewline
-        Write-Host "$esc]8;;$launcherUri$st$SessionId$esc]8;;$st" -ForegroundColor DarkYellow -NoNewline
-        Write-Host " Ctrl+click" -ForegroundColor DarkGray -NoNewline
+    if ($env:WT_SESSION -and -not [Console]::IsOutputRedirected) {
+        $script:ClickActions[[Console]::CursorTop] = @{
+            SessionId = $SessionId
+            Path = $Path
+        }
+        Write-Host "🖱️ $SessionId click" -ForegroundColor DarkYellow -NoNewline
+        return
     }
-    else {
-        Write-Host $SessionId -ForegroundColor DarkGray -NoNewline
+
+    Write-Host $SessionId -ForegroundColor DarkGray -NoNewline
+}
+
+function Open-RecoveryTab {
+    param(
+        [string]$Path,
+        [string]$SessionId
+    )
+
+    $startDir = if ($Path -and (Test-Path $Path -ErrorAction SilentlyContinue)) {
+        $Path
+    } else {
+        $env:USERPROFILE
+    }
+
+    $arguments = @("-w", "0", "new-tab", "-d", $startDir, $script:CallerShell)
+    if ($SessionId) {
+        $shellName = [IO.Path]::GetFileNameWithoutExtension($script:CallerShell).ToLowerInvariant()
+        if ($shellName -eq "cmd") {
+            $arguments += @("/K", "copilot --resume=$SessionId")
+        }
+        else {
+            $arguments += @("-NoExit", "-Command", "copilot --resume=$SessionId")
+        }
+    }
+
+    & wt @arguments
+}
+
+function Read-RecoveryChoice {
+    Write-Host "`n  Numbers (comma-sep), A=all tabs, W=restore windows, Q=quit; or click a session ID:" -ForegroundColor Yellow
+    Write-Host "  Choice: " -ForegroundColor Yellow -NoNewline
+
+    if (-not $env:WT_SESSION -or [Console]::IsInputRedirected) {
+        return Read-Host
+    }
+
+    $esc = [char]27
+    [Console]::Write("$esc[?1000h$esc[?1006h")
+    $typed = [Text.StringBuilder]::new()
+
+    try {
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+
+            if ($key.Key -eq [ConsoleKey]::Enter) {
+                Write-Host ""
+                return $typed.ToString()
+            }
+
+            if ($key.Key -eq [ConsoleKey]::Backspace) {
+                if ($typed.Length -gt 0) {
+                    $typed.Length--
+                    [Console]::Write("`b `b")
+                }
+                continue
+            }
+
+            if ($key.Key -eq [ConsoleKey]::Escape) {
+                $sequence = [Text.StringBuilder]::new()
+                $deadline = [DateTime]::UtcNow.AddMilliseconds(150)
+                while ([DateTime]::UtcNow -lt $deadline) {
+                    if (-not [Console]::KeyAvailable) {
+                        Start-Sleep -Milliseconds 5
+                        continue
+                    }
+                    $part = [Console]::ReadKey($true).KeyChar
+                    [void]$sequence.Append($part)
+                    if ($part -eq 'M' -or $part -eq 'm') { break }
+                }
+
+                if ($sequence.ToString() -match '^\[<0;(\d+);(\d+)[Mm]$') {
+                    $bufferRow = [Console]::WindowTop + [int]$Matches[2] - 1
+                    if ($script:ClickActions.ContainsKey($bufferRow)) {
+                        Write-Host ""
+                        return ,$script:ClickActions[$bufferRow]
+                    }
+                }
+                elseif ($sequence.Length -eq 0) {
+                    Write-Host ""
+                    return "Q"
+                }
+                continue
+            }
+
+            if (-not [char]::IsControl($key.KeyChar)) {
+                [void]$typed.Append($key.KeyChar)
+                [Console]::Write($key.KeyChar)
+            }
+        }
+    }
+    finally {
+        [Console]::Write("$esc[?1000l$esc[?1006l")
     }
 }
 
@@ -132,7 +206,7 @@ if ($closedWindows.Count -gt 0) {
                 if ($t.Summary) { Write-Host "  💬 $($t.Summary)" -ForegroundColor DarkCyan -NoNewline }
                 if ($t.CopilotId) {
                     Write-Host "  " -NoNewline
-                    Write-SessionLink -SessionId $t.CopilotId
+                    Write-SessionLink -SessionId $t.CopilotId -Path $t.Path
                 }
                 Write-Host ""
             }
@@ -151,7 +225,7 @@ if ($sess.Tabs.Count -gt 0) {
         if ($tab.Summary) { Write-Host "      💬 $($tab.Summary)" -ForegroundColor DarkCyan }
         if ($tab.CopilotId) {
             Write-Host "      🔑 " -ForegroundColor DarkGray -NoNewline
-            Write-SessionLink -SessionId $tab.CopilotId
+            Write-SessionLink -SessionId $tab.CopilotId -Path $tab.Path
             Write-Host ""
         }
     }
@@ -166,15 +240,19 @@ if ($sess.AllSessions.Count -gt 0) {
         Write-Host "  [$n] 🤖 $folder" -ForegroundColor White
         if ($cs.Summary) { Write-Host "      💬 $($cs.Summary)" -ForegroundColor DarkCyan }
         Write-Host "      🔑 " -ForegroundColor DarkGray -NoNewline
-        Write-SessionLink -SessionId $cs.SessionId
+        Write-SessionLink -SessionId $cs.SessionId -Path $cs.Cwd
         Write-Host "  📅 $($cs.Updated)" -ForegroundColor DarkGray
     }
 }
 
 if ($items.Count -eq 0) { Write-Host "  No sessions found" -ForegroundColor Yellow; return }
-Write-Host "`n  Numbers (comma-sep), A=all tabs, W=restore windows, Q=quit:" -ForegroundColor Yellow; $inp = Read-Host "  Choice"
+$inp = Read-RecoveryChoice
+if ($inp -is [hashtable]) {
+    Open-RecoveryTab -Path $inp.Path -SessionId $inp.SessionId
+    Write-Host "  🚀 Opened clicked session in the current Terminal window" -ForegroundColor Green
+    return
+}
 if ($inp -eq "Q") { return }
-$s = "C:\Program Files\PowerShell\7\pwsh.exe"
 
 if ($inp -eq "W") {
     # Restore all closed windows with their tabs
@@ -182,15 +260,10 @@ if ($inp -eq "W") {
         if ($item.Type -ne "window") { continue }
         $win = $item.Data
         if (-not $win.Tabs -or $win.Tabs.Count -eq 0) { continue }
-        $firstTab = $win.Tabs[0]
-        $firstCmd = if ($firstTab.HasCopilot -and $firstTab.CopilotId) { "-d `"$($firstTab.Path)`" `"$s`" -NoExit -Command `"copilot --resume=$($firstTab.CopilotId)`"" } else { "-d `"$($firstTab.Path)`" `"$s`"" }
-        $wtArgs = $firstCmd
-        for ($i = 1; $i -lt $win.Tabs.Count; $i++) {
-            $t = $win.Tabs[$i]
-            $tabCmd = if ($t.HasCopilot -and $t.CopilotId) { "new-tab -d `"$($t.Path)`" `"$s`" -NoExit -Command `"copilot --resume=$($t.CopilotId)`"" } else { "new-tab -d `"$($t.Path)`" `"$s`"" }
-            $wtArgs += " `; $tabCmd"
+        foreach ($t in $win.Tabs) {
+            $sessionId = if ($t.HasCopilot) { $t.CopilotId } else { $null }
+            Open-RecoveryTab -Path $t.Path -SessionId $sessionId
         }
-        Start-Process wt -ArgumentList $wtArgs
         Write-Host "  🚀 Restored window with $($win.Tabs.Count) tabs" -ForegroundColor Green
         Start-Sleep 2
     }
@@ -206,25 +279,23 @@ foreach ($x in $idx) {
         # Restore entire window with composite wt command
         $win = $item.Data
         if (-not $win.Tabs -or $win.Tabs.Count -eq 0) { continue }
-        $firstTab = $win.Tabs[0]
-        $firstCmd = if ($firstTab.HasCopilot -and $firstTab.CopilotId) { "-d `"$($firstTab.Path)`" `"$s`" -NoExit -Command `"copilot --resume=$($firstTab.CopilotId)`"" } else { "-d `"$($firstTab.Path)`" `"$s`"" }
-        $wtArgs = $firstCmd
-        for ($i = 1; $i -lt $win.Tabs.Count; $i++) {
-            $t = $win.Tabs[$i]
-            $tabCmd = if ($t.HasCopilot -and $t.CopilotId) { "new-tab -d `"$($t.Path)`" `"$s`" -NoExit -Command `"copilot --resume=$($t.CopilotId)`"" } else { "new-tab -d `"$($t.Path)`" `"$s`"" }
-            $wtArgs += " `; $tabCmd"
+        foreach ($t in $win.Tabs) {
+            $sessionId = if ($t.HasCopilot) { $t.CopilotId } else { $null }
+            Open-RecoveryTab -Path $t.Path -SessionId $sessionId
         }
-        Start-Process wt -ArgumentList $wtArgs
         Write-Host "  🚀 Restored window with $($win.Tabs.Count) tabs" -ForegroundColor Green
     }
     elseif ($item.Type -eq "tab") {
         $t = $item.Data
-        if ($t.HasCopilot -and $t.CopilotId) { Start-Process wt -ArgumentList "-d `"$($t.Path)`" `"$s`" -NoExit -Command `"copilot --resume=$($t.CopilotId)`""; Write-Host "  🚀 $($t.Folder) + copilot" -ForegroundColor Green }
-        else { Start-Process wt -ArgumentList "-d `"$($t.Path)`" `"$s`""; Write-Host "  📂 $($t.Folder)" -ForegroundColor Cyan }
+        $sessionId = if ($t.HasCopilot) { $t.CopilotId } else { $null }
+        Open-RecoveryTab -Path $t.Path -SessionId $sessionId
+        if ($sessionId) { Write-Host "  🚀 $($t.Folder) + copilot" -ForegroundColor Green }
+        else { Write-Host "  📂 $($t.Folder)" -ForegroundColor Cyan }
     }
     elseif ($item.Type -eq "session") {
         $cs = $item.Data
-        Start-Process wt -ArgumentList "-d `"$($cs.Cwd)`" `"$s`" -NoExit -Command `"copilot --resume=$($cs.SessionId)`""; Write-Host "  🚀 $(Split-Path $cs.Cwd -Leaf) + copilot" -ForegroundColor Green
+        Open-RecoveryTab -Path $cs.Cwd -SessionId $cs.SessionId
+        Write-Host "  🚀 $(Split-Path $cs.Cwd -Leaf) + copilot" -ForegroundColor Green
     }
     Start-Sleep 1
 }

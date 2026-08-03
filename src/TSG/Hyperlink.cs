@@ -43,9 +43,10 @@ public static class Hyperlink
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".tsg", "session-links");
         var launcherPath = Path.Combine(linksDir, $"resume-{sessionGuid:D}.cmd");
+        var callerShell = ShellContext.Resolve();
         var launcher = string.Join("\r\n",
             "@echo off",
-            $"\"{tsgPath}\" resume \"{sessionGuid:D}\"",
+            $"\"{tsgPath}\" resume \"{sessionGuid:D}\" --shell \"{callerShell.Executable}\"",
             "exit /b %errorlevel%",
             "");
 

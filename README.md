@@ -163,7 +163,8 @@ When `tsg windows` knows a Copilot session ID, it prints a short ID such as
 `[cf530ca2]` as an OSC 8 terminal hyperlink. In Windows Terminal, activate the
 link with the terminal's configured mouse-link gesture (normally Ctrl+click).
 TSG then opens a **new tab**, changes to the session's recorded working
-directory, and runs:
+directory, reuses the calling shell application (`pwsh`, Windows PowerShell, or
+`cmd`), and runs:
 
 ```powershell
 copilot --resume=<sessionId>
@@ -193,9 +194,13 @@ tsg recover --limit 1000
 tsg recover --all
 ```
 
-Session IDs displayed by `tsg recover` use the same `🔗 … Ctrl+click`
-launcher as `tsg windows`. This applies to sessions inside tracked windows,
-currently open tabs, and the stored Copilot-session list.
+Session IDs displayed by `tsg recover` are native mouse targets inside the
+interactive recovery screen. Click the yellow `🖱️ … click` text directly; TSG
+does not open a `file://` or web link, so Windows Terminal does not show an
+unsafe-location warning. This applies to sessions inside tracked windows,
+currently open tabs, and the stored Copilot-session list. The new tab targets
+the currently active Windows Terminal window and preserves the shell that
+invoked TSG.
 
 ### Optional Large Lists
 
