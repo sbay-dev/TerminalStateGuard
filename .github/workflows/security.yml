@@ -1,5 +1,8 @@
 name: Security Scan
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -22,7 +25,7 @@ jobs:
         dotnet-version: '10.0.x'
 
     - name: Restore
-      run: dotnet restore src/TSG/TSG.csproj
+      run: dotnet restore src/TSG/TSG.csproj --locked-mode
 
     - name: Vulnerability scan
       run: dotnet list src/TSG/TSG.csproj package --vulnerable --include-transitive
@@ -31,10 +34,18 @@ jobs:
       run: dotnet list src/TSG/TSG.csproj package --deprecated --include-transitive
 
     - name: Build with analyzers
-      run: dotnet build src/TSG/TSG.csproj -c Release
+      run: dotnet build src/TSG/TSG.csproj -c Release --no-restore -warnaserror
 
     - name: Verify code formatting
-      run: dotnet format src/TSG/TSG.csproj --verify-no-changes --no-restore || true
+      run: dotnet format src/TSG/TSG.csproj --verify-no-changes --no-restore
+
+    - name: Publication boundary scan
+      shell: bash
+      run: |
+        if git ls-files | grep -E '(^|/)(bin|obj|\.vs|node_modules|publish|artifacts)/|(^|/)\.env$|terminal\.db$|NuGet\.Config$'; then
+          echo "Blocked generated, local-feed, database, or credential-bearing files are tracked."
+          exit 1
+        fi
 
     - name: Generate audit report
       run: |
@@ -47,6 +58,6 @@ jobs:
         echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
         echo "| Vulnerable packages | ✅ None |" >> $GITHUB_STEP_SUMMARY
         echo "| Deprecated packages | ✅ None |" >> $GITHUB_STEP_SUMMARY
-        echo "| External dependencies | ✅ Zero |" >> $GITHUB_STEP_SUMMARY
+        echo "| Direct package references | ✅ Microsoft.Data.Sqlite + patched SQLite native pin |" >> $GITHUB_STEP_SUMMARY
         echo "| Static analysis (CA) | ✅ Clean |" >> $GITHUB_STEP_SUMMARY
         echo "| NuGet audit enabled | ✅ Level: low |" >> $GITHUB_STEP_SUMMARY

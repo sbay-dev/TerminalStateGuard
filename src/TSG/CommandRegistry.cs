@@ -14,28 +14,28 @@ public static class CommandRegistry
 
         return new(StringComparer.OrdinalIgnoreCase)
         {
-            ["install"]   = async _ => { await installer.InstallAsync(); return 0; },
+            ["install"] = async _ => { await installer.InstallAsync(); return 0; },
             ["uninstall"] = async _ => { await installer.UninstallAsync(); return 0; },
-            ["boost"]     = args => runner.RunAsync("boost", args),
-            ["monitor"]   = args => runner.RunAsync("monitor", args),
-            ["status"]    = args => runner.RunAsync("status", args),
-            ["recover"]   = args => runner.RunAsync("recover", args),
-            ["restore"]   = args => runner.RunAsync("restore", args),
-            ["focus"]     = args => runner.RunAsync("focus", args),
+            ["boost"] = args => runner.RunAsync("boost", args),
+            ["monitor"] = args => runner.RunAsync("monitor", args),
+            ["status"] = args => runner.RunAsync("status", args),
+            ["recover"] = args => runner.RunAsync("recover", args),
+            ["restore"] = args => runner.RunAsync("restore", args),
+            ["focus"] = args => runner.RunAsync("focus", args),
             ["snapshots"] = args => Snapshots.RunAsync(host, args),
-            ["windows"]   = args => Windows.RunAsync(host, args),
-            ["capture"]   = args => StateCapture.RunAsync(host, args),
+            ["windows"] = args => Windows.RunAsync(host, args),
+            ["capture"] = args => StateCapture.RunAsync(host, args),
             ["processes"] = args => ProcessManager.RunAsync(host, args),
-            ["ps"]        = args => ProcessManager.RunAsync(host, args),
-            ["db"]        = args => DbQuery.RunAsync(host, args),
-            ["doctor"]    = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
-            ["config"]    = args => Configuration.RunAsync(host, args),
-            ["resume"]    = args => SessionResume.RunAsync(host, args),
-            ["version"]   = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
-            ["help"]      = _ => { PrintHelp(); return Task.FromResult(0); },
-            ["--help"]    = _ => { PrintHelp(); return Task.FromResult(0); },
-            ["-h"]        = _ => { PrintHelp(); return Task.FromResult(0); },
-            ["-v"]        = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
+            ["ps"] = args => ProcessManager.RunAsync(host, args),
+            ["db"] = args => DbQuery.RunAsync(host, args),
+            ["doctor"] = async _ => { await Diagnostics.RunDoctorAsync(host); return 0; },
+            ["config"] = args => Configuration.RunAsync(host, args),
+            ["resume"] = args => SessionResume.RunAsync(host, args),
+            ["version"] = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
+            ["help"] = _ => { PrintHelp(); return Task.FromResult(0); },
+            ["--help"] = _ => { PrintHelp(); return Task.FromResult(0); },
+            ["-h"] = _ => { PrintHelp(); return Task.FromResult(0); },
+            ["-v"] = _ => { Console.WriteLine($"tsg {Assembly.GetExecutingAssembly().GetName().Version}"); return Task.FromResult(0); },
         };
     }
 
@@ -64,6 +64,9 @@ public static class CommandRegistry
             tsg focus         Focus ALL resources on one stuck process (Admin)
             tsg focus <PID>   Focus on specific PID
             tsg focus --undo  Restore normal priorities
+            tsg recover       Recover terminal tabs and Copilot sessions
+            tsg recover -n N  Show up to N sessions (maximum 5000)
+            tsg recover --all Show all sessions (up to 5000)
             tsg snapshots     List all saved terminal snapshots
             tsg snapshots --all  Show all with tab details
             tsg windows       Show active & recently closed windows with tabs

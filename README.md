@@ -9,7 +9,7 @@
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-blue?style=for-the-badge)]()
 
-**Real-time window tracking · Live tab detection · Process management · Session recovery**
+**Real-time window tracking · Live tab detection · Process management · Click-to-resume sessions**
 
 [Installation](#-installation) · [Commands](#-commands) · [Windows](#-window-tracking) · [Processes](#-process-manager) · [Monitor](#-safe-monitor) · [Recovery](#-session-recovery)
 
@@ -26,6 +26,13 @@ tsg install
 
 **Done.** Reopen your terminal — shortcuts, profiles, and integration are active.
 
+To update an existing installation:
+
+```powershell
+dotnet tool update -g TerminalStateGuard
+tsg install
+```
+
 ### What `tsg install` does:
 
 | Platform | Action |
@@ -33,6 +40,7 @@ tsg install
 | **Windows** | Installs [Windows Terminal Fragment](https://learn.microsoft.com/en-us/windows/terminal/json-fragment-extensions) with dedicated profiles & icons |
 | **Windows** | Configures PSReadLine keyboard shortcuts in PowerShell profile |
 | **Windows** | Deploys `FileSystemWatcher` for event-driven state tracking |
+| **Windows** | Registers the per-user `tsg://` URL protocol for clickable session IDs |
 | **Linux** | Adds shell aliases and keybindings to `.bashrc`/`.zshrc` |
 | **Both** | Deploys scripts to `~/.tsg/` and creates SQLite database |
 
@@ -63,9 +71,15 @@ tsg focus         # 🎯 Focus ALL resources on stuck process (Admin)
 ```bash
 tsg windows            # Show active & recently closed windows with tabs
 tsg windows -i         # 🖥️ Interactive window dashboard
+tsg windows -n 100     # Show up to 100 recently closed windows
+tsg windows --all      # Show up to 500 recently closed windows
 tsg windows --history  # Browse window history from database
+tsg windows --history -n 250  # Show a larger capture history
 tsg windows --restore  # Restore closed windows with all tabs
+tsg resume <sessionId> # Open one Copilot session in a new tab
 tsg recover            # 🔄 Recover terminal tabs + Copilot sessions
+tsg recover -n 500     # Show up to 500 recoverable sessions
+tsg recover --all      # Show all recoverable sessions (cap: 5000)
 tsg snapshots          # 📸 List all saved terminal snapshots
 tsg snapshots --all    # Show all with tab details
 tsg capture            # Capture current terminal state to SQLite
@@ -140,7 +154,50 @@ The interactive dashboard provides a menu-driven interface:
 - **[H] History** — Browse window open/close timeline from database
 - **[P] Processes** — Switch to process manager
 - **[F] Refresh** — Refresh live window data
+- **[+]/[-] Limit** — Increase or decrease the number of closed windows displayed
 - **[Q] Quit**
+
+### Clickable Copilot Session IDs
+
+When `tsg windows` knows a Copilot session ID, it prints a short ID such as
+`[cf530ca2]` as an OSC 8 terminal hyperlink. In Windows Terminal, activate the
+link with the terminal's configured mouse-link gesture (normally Ctrl+click).
+TSG then opens a **new tab**, changes to the session's recorded working
+directory, and runs:
+
+```powershell
+copilot --resume=<sessionId>
+```
+
+The link uses the per-user `tsg://resume/<sessionId>` protocol registered by
+`tsg install`. The equivalent command works without mouse support:
+
+```powershell
+tsg resume cf530ca2-7e16-467e-8004-3ff26f0c5319
+```
+
+Run `tsg install` again after upgrading if clickable links do not open. Output
+redirected to a file or pipe intentionally contains plain text instead of OSC 8
+control sequences.
+
+The recovery list has its own optional limit:
+
+```powershell
+tsg recover -n 500
+tsg recover --limit 1000
+tsg recover --all
+```
+
+### Optional Large Lists
+
+The default view stays compact. Increase it only when needed:
+
+```powershell
+tsg windows -n 100          # 100 recently closed windows
+tsg windows --all           # Soft preset: up to 500
+tsg windows -n 2000         # Explicit values are capped at 5000
+tsg windows --history -n 250
+```
 
 ### How Live Detection Works
 
@@ -275,11 +332,18 @@ Scans Windows Terminal state + Copilot sessions and reopens tabs with `copilot -
 
 ### Window Restore (`tsg windows --restore`)
 
-Restores closed windows with their last known tabs from the SQLite database:
+Restores closed windows with their last known tab order, working directories,
+and Copilot session IDs from the SQLite database:
 
 ```bash
 tsg windows --restore    # Interactive selection from closed windows
 ```
+
+If an older capture predates reliable session-ID recording, TSG correlates the
+tab title, working directory, and nearest session timestamp against
+`~/.copilot/session-state/*/workspace.yaml`. A match must pass a minimum score;
+TSG leaves ambiguous tabs as ordinary shells rather than resuming an unsupported
+session.
 
 ## 📸 Snapshots
 
@@ -357,8 +421,28 @@ tsg doctor
 - ✅ All monitoring is **read-only** — only reads metadata
 - ✅ Never deletes, trims, or edits `events.jsonl`
 - ✅ Session recovery uses native `copilot --resume`
+- ✅ Clickable session links use a per-user `tsg://` handler and require no elevation
 - ✅ Process kill requires explicit user confirmation with impact analysis
 - ✅ All data stored locally in `~/.tsg/` — no network access
+
+## 🧱 Build from a Clean Clone
+
+TSG uses only public NuGet dependencies and commits `packages.lock.json`.
+
+```powershell
+git clone https://github.com/sbay-dev/TerminalStateGuard.git
+Set-Location TerminalStateGuard
+dotnet restore .\src\TSG\TSG.csproj --locked-mode
+dotnet build .\src\TSG\TSG.csproj --configuration Release --no-restore -warnaserror
+dotnet pack .\src\TSG\TSG.csproj --configuration Release --no-build
+```
+
+Release security evidence is published in the GitHub Actions run summary for
+each `v*` tag:
+
+- [Release workflow](https://github.com/sbay-dev/TerminalStateGuard/actions/workflows/release.yml)
+- [Security workflow](https://github.com/sbay-dev/TerminalStateGuard/actions/workflows/security.yml)
+- `SHA256SUMS.txt` contains integrity hashes for the published source files
 
 ## ⚡ Architecture
 
@@ -377,6 +461,8 @@ tsg (dotnet tool)
  ├── UiaComHelper.cs           — COM IUIAutomation interop via P/Invoke
  ├── TerminalDatabase.cs       — SQLite temporal database layer
  ├── Windows.cs                — Window tracking & interactive dashboard
+ ├── Hyperlink.cs              — OSC 8 clickable session links
+ ├── Resume.cs                 — New-tab Copilot session resume command
  ├── ProcessManager.cs         — Dev process manager with interactive UI
  ├── Snapshots.cs              — Snapshot listing and management
  ├── DbQuery.cs                — Direct SQL query interface

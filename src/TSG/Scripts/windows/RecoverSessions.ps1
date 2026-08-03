@@ -1,10 +1,15 @@
-# RecoverSessions v3.0 - Window-grouped recovery with timestamps
-param([int]$Days = 7)
+# RecoverSessions - Window-grouped recovery with timestamps
+param(
+    [int]$Days = 7,
+    [ValidateRange(1, 5000)][int]$Limit = 0,
+    [switch]$All
+)
 
-$script:MaxSessions = if ($env:TSG_MAX_SNAPSHOTS) { [int]$env:TSG_MAX_SNAPSHOTS } else {
+$configuredLimit = if ($env:TSG_MAX_SNAPSHOTS) { [int]$env:TSG_MAX_SNAPSHOTS } else {
     $cfgPath = Join-Path $env:USERPROFILE ".tsg\tsg-config.json"
     if (Test-Path $cfgPath) { try { (Get-Content $cfgPath -Raw | ConvertFrom-Json).MaxSnapshots } catch { 50 } } else { 50 }
 }
+$script:MaxSessions = if ($All) { 5000 } elseif ($Limit -gt 0) { $Limit } else { $configuredLimit }
 
 function Get-CopilotSessionMap {
     $all = @(); $sr = Join-Path $env:USERPROFILE ".copilot\session-state"
@@ -55,7 +60,8 @@ function Get-AllSessions { param([int]$Days = 7)
     return $s
 }
 
-Write-Host "`n  🔄 Session Recovery v3.0  (max: $script:MaxSessions)" -ForegroundColor Cyan
+$displayVersion = if ($env:TSG_VERSION) { $env:TSG_VERSION } else { "unknown" }
+Write-Host "`n  🔄 TSG Session Recovery v$displayVersion  (max: $script:MaxSessions)" -ForegroundColor Cyan
 $sess = Get-AllSessions -Days $Days; $cc = ($sess.Tabs | Where-Object { $_.HasCopilot }).Count
 Write-Host "  ✅ $($sess.Tabs.Count) tabs ($cc copilot) + $($sess.AllSessions.Count) sessions`n" -ForegroundColor Green
 

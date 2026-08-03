@@ -1,5 +1,8 @@
 name: Release to NuGet
 
+permissions:
+  contents: read
+
 on:
   push:
     tags: ['v*']
@@ -22,7 +25,7 @@ jobs:
         dotnet-version: '10.0.x'
 
     - name: Restore
-      run: dotnet restore src/TSG/TSG.csproj
+      run: dotnet restore src/TSG/TSG.csproj --locked-mode
 
     - name: Vulnerability scan
       run: |
@@ -48,7 +51,7 @@ jobs:
     - name: Build with full analysis
       run: |
         echo "## 🛡️ Static Analysis" >> $GITHUB_STEP_SUMMARY
-        dotnet build src/TSG/TSG.csproj -c Release -warnaserror 2>&1 | tee build.txt
+        dotnet build src/TSG/TSG.csproj -c Release --no-restore -warnaserror 2>&1 | tee build.txt
         if grep -q "Build succeeded" build.txt; then
           echo "✅ Zero warnings with AnalysisLevel=latest-all" >> $GITHUB_STEP_SUMMARY
         else
@@ -79,11 +82,14 @@ jobs:
         if (-not $v) { $v = "1.0.0" }
         "VERSION=$v" >> $env:GITHUB_OUTPUT
 
+    - name: Restore locked dependencies
+      run: dotnet restore src/TSG/TSG.csproj --locked-mode
+
     - name: Build
-      run: dotnet build src/TSG/TSG.csproj -c Release -p:Version=${{ steps.ver.outputs.VERSION }}
+      run: dotnet build src/TSG/TSG.csproj -c Release --no-restore -p:Version=${{ steps.ver.outputs.VERSION }}
 
     - name: Pack
-      run: dotnet pack src/TSG/TSG.csproj -c Release -o artifacts -p:Version=${{ steps.ver.outputs.VERSION }}
+      run: dotnet pack src/TSG/TSG.csproj -c Release --no-build --no-restore -o artifacts -p:Version=${{ steps.ver.outputs.VERSION }}
 
     - name: Push to NuGet
       shell: pwsh
@@ -101,7 +107,7 @@ jobs:
           ## 🛡️ Security Audit: ✅ Passed
           - Vulnerability scan: 0 issues
           - Static analysis: 0 warnings (AnalysisLevel=latest-all)
-          - External dependencies: None
+          - Direct package references: Microsoft.Data.Sqlite + patched SQLite native pin
           
           ## 📦 Install
           ```bash

@@ -14,10 +14,12 @@ TSG is built with a **security-first** philosophy:
 ### 🛡️ Read-Only Monitoring
 - The monitor **never modifies** Copilot session files (`events.jsonl`, `session.db`, `workspace.yaml`)
 - All session diagnostics are performed by reading file metadata only
-- No write operations are performed on any files outside `~/.tsg/`
+- Monitoring does not modify Copilot session files; installation writes only the
+  documented PowerShell profile, Windows Terminal fragment, and per-user URL handler
 
 ### 🔒 Minimal Dependencies
-- TSG has **one external dependency**: `Microsoft.Data.Sqlite` 10.0.6 (Microsoft-maintained)
+- TSG directly references `Microsoft.Data.Sqlite` 10.0.6 and pins
+  `SQLitePCLRaw.lib.e_sqlite3` 2.1.12 to avoid the vulnerable transitive 2.1.11 release
 - All other functionality uses .NET 10 SDK built-in libraries and COM interop
 - Supply-chain attack surface is minimal
 - Verified via `dotnet list package --vulnerable --include-transitive`
@@ -41,6 +43,7 @@ TSG is built with a **security-first** philosophy:
   - `~/.copilotAccel/terminal-snapshots/` — snapshot files (read/write)
   - PowerShell profile — appends a marked block (write, with clean uninstall)
   - Windows Terminal Fragments dir — drops a JSON file (write, with clean uninstall)
+  - `HKCU\Software\Classes\tsg` — per-user URL protocol for clickable session IDs
 - **Process operations**: reads process list via WMI, optionally kills processes (with user confirmation), optionally sets priority (requires Admin/sudo)
 - **COM access**: Uses `IUIAutomation` COM interface for live window/tab enumeration (read-only)
 
@@ -63,8 +66,15 @@ Vulnerability Scan:     ✅ 0 vulnerable packages
 Deprecated Packages:    ✅ 0 deprecated packages
 Static Analysis (CA):   ✅ 0 security warnings
 NuGet Audit:            ✅ Enabled (level: low, mode: all)
-External Dependencies:  ✅ 1 (Microsoft.Data.Sqlite — Microsoft-maintained)
+Direct Package References: ✅ 2 (SQLite provider + patched native SQLite pin)
 ```
+
+### 🔗 Clickable Session-Link Safety
+
+- Session links use `tsg://resume/<GUID>` and are registered only under the current user
+- The handler invokes the installed `tsg` executable; it does not invoke a browser or remote endpoint
+- Session IDs are validated and the working directory is read from the local `workspace.yaml`
+- `tsg uninstall` removes the `HKCU\Software\Classes\tsg` protocol registration
 
 ## Reporting a Vulnerability
 
@@ -86,3 +96,11 @@ Every release is automatically scanned:
 - dotnet build with AnalysisLevel=latest-all
 - dotnet format --verify-no-changes
 ```
+
+GitHub-hosted reports are available from:
+
+- <https://github.com/sbay-dev/TerminalStateGuard/actions/workflows/release.yml>
+- <https://github.com/sbay-dev/TerminalStateGuard/actions/workflows/security.yml>
+
+The release workflow summary is the authoritative report location. Source-file
+integrity hashes are committed in `SHA256SUMS.txt`.

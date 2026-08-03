@@ -38,7 +38,10 @@ public static class Hyperlink
         var prev = Console.ForegroundColor;
         Console.ForegroundColor = color;
         var shortId = sessionId.Length > 8 ? sessionId[..8] : sessionId;
+        Console.Write("🔗 ");
         Console.Write(Wrap(ResumeUrl(sessionId), $"[{shortId}]"));
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write(" Ctrl+click");
         Console.ForegroundColor = prev;
     }
 }

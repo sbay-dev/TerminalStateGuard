@@ -24,7 +24,7 @@ public static class SessionResume
         }
 
         var sessionId = ExtractSessionId(args[0]);
-        if (string.IsNullOrEmpty(sessionId))
+        if (sessionId == null)
         {
             Console.WriteLine($"  ❌ Invalid session ID: {args[0]}");
             return Task.FromResult(1);
@@ -58,14 +58,13 @@ public static class SessionResume
     }
 
     /// <summary>Extract the session ID from either a bare GUID or a <c>tsg://resume/&lt;id&gt;</c> URL.</summary>
-    static string ExtractSessionId(string input)
+    static string? ExtractSessionId(string input)
     {
         var s = input.Trim().Trim('/');
         const string prefix = "tsg://resume/";
         if (s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             s = s[prefix.Length..].Trim('/');
-        // Accept just the raw id if it looks like a GUID or hex string
-        return Guid.TryParse(s, out var g) ? g.ToString("D") : s;
+        return Guid.TryParse(s, out var g) ? g.ToString("D") : null;
     }
 
     static string? GetSessionCwd(string sessionId)
